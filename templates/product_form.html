@@ -3,34 +3,37 @@
 {% block content %}
 <div class="page-header">
   <h1 class="page-title">{{ 'تعديل: ' ~ product.name if product else 'إضافة منتج جديد' }}</h1>
-  <p class="page-sub">املأ التفاصيل، أو استخدم اقتراح AI لو مش متأكد من الصياغة</p>
+  <p class="page-sub">كل ما تملأ أكتر، كل ما البوت يبقى أقوى في البيع والإقناع</p>
 </div>
 
 {% if not product %}
 <div class="card" style="border:1px solid #DDD0F8; background:linear-gradient(135deg,#FBF9FF,#F4EEFF)">
-  <h3 style="display:flex; align-items:center; gap:8px">✨ مساعد الذكاء الاصطناعي</h3>
-  <p class="page-sub" style="margin-bottom:10px">اكتب وصف بسيط للمنتج بكلماتك، والـ AI هيقترحلك اسم احترافي ووصف بيعي وكلمات بحث</p>
+  <h3 style="display:flex; align-items:center; gap:8px; margin-top:0">✨ مساعد الذكاء الاصطناعي</h3>
+  <p class="page-sub" style="margin-bottom:10px">اكتب وصف بسيط للمنتج، والـ AI هيقترحلك اسم ووصف وكلمات بحث</p>
   <textarea id="ai-short-input" placeholder="مثال: كريم للحبوب فيه شي بتر وزيت شاي، بيهدي الالتهاب"></textarea>
-  <button type="button" class="btn-ai" style="margin-top:10px" onclick="suggestProduct()">
-    ✨ اقترح لي التفاصيل
-  </button>
+  <button type="button" class="btn-ai" style="margin-top:10px" onclick="suggestProduct()">✨ اقترح لي التفاصيل</button>
   <div id="ai-result" class="ai-box"></div>
 </div>
 {% endif %}
 
 <form method="POST" class="card">
+  <!-- ===== أساسيات ===== -->
+  <h3 style="color:var(--primary-dark); margin-top:0">📋 الأساسيات</h3>
+
   <label>اسم المنتج *</label>
   <input type="text" name="name" id="f-name" required value="{{ product.name if product else '' }}">
 
-  <label>مفتاح المنتج (بالإنجليزي، بدون مسافات) * <span class="hint">يُستخدم داخلياً مثل: eczema</span></label>
+  <label>مفتاح المنتج (بالإنجليزي بدون مسافات) * <span class="hint">مثال: eczema_cream</span></label>
   <input type="text" name="product_key" value="{{ product.product_key if product else '' }}" required>
 
-  <label>الوصف <span class="hint">ده اللي البوت هيشرحه للعميل</span></label>
+  <label>الوصف العام <span class="hint">ده اللي البوت بيشرحه للعميل</span></label>
   <textarea name="description" id="f-description">{{ product.description if product else '' }}</textarea>
 
-  <label>كلمات البحث (RAG) <span class="hint">كلمات مفصولة بفاصلة يستخدمها العميل فعلياً، مثل: حبوب,بثور,حب الشباب</span></label>
+  <label>كلمات البحث (RAG) <span class="hint">مفصولة بفاصلة — كلمات العميل الفعلية</span></label>
   <textarea name="keywords" id="f-keywords" style="min-height:50px">{{ product.keywords if product else '' }}</textarea>
 
+  <!-- ===== التسعير ===== -->
+  <h3 style="color:var(--primary-dark); margin-top:24px">💰 التسعير</h3>
   <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px">
     <div>
       <label>نوع التسعير</label>
@@ -45,31 +48,63 @@
       <input type="number" step="0.01" name="price_amount" value="{{ product.price_amount if product else '' }}">
     </div>
   </div>
-
-  <label>مصاريف الشحن (ج)</label>
-  <input type="number" step="0.01" name="shipping_fee" value="{{ product.shipping_fee if product else 50 }}">
-
-  <label>نص السعر الجاهز <span class="hint">ده النص اللي البوت بيقوله بالظبط، مثال: 449 ج شامل الشحن</span></label>
-  <input type="text" name="price_note" value="{{ product.price_note if product else '' }}">
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px">
+    <div>
+      <label>مصاريف الشحن (ج)</label>
+      <input type="number" step="0.01" name="shipping_fee" value="{{ product.shipping_fee if product else 50 }}">
+    </div>
+    <div>
+      <label>نص السعر الجاهز <span class="hint">المثال: 449 ج شامل الشحن</span></label>
+      <input type="text" name="price_note" value="{{ product.price_note if product else '' }}">
+    </div>
+  </div>
 
   <label>رابط المنتج (اختياري)</label>
   <input type="url" name="product_link" value="{{ product.product_link if product else '' }}">
 
+  <!-- ===== محتوى البيع ===== -->
+  <h3 style="color:var(--primary-dark); margin-top:24px">🎯 محتوى البيع والإقناع</h3>
+  <p class="helper-text" style="margin-bottom:14px">هذه الحقول بتخلي البوت يبيع بشكل أقوى — كل ما تملأ أكتر كل ما النتائج أحسن</p>
+
+  <label>المميزات الرئيسية <span class="hint">كل ميزة في سطر منفصل</span></label>
+  <textarea name="features" style="min-height:90px" placeholder="طبيعي 100% بدون كورتيزون&#10;يخفف الحكة من أول استخدام&#10;آمن للاستخدام اليومي" id="f-features">{{ product_features_text or '' }}</textarea>
+
+  <label>من يستفيد من هذا المنتج؟</label>
+  <textarea name="who_benefits" style="min-height:60px" placeholder="مثال: من يعانون من حكة وتهيج الجلد المزمن بدون سبب واضح">{{ product.who_benefits if product else '' }}</textarea>
+
+  <label>متى تظهر النتيجة؟</label>
+  <input type="text" name="results_timeline"
+         value="{{ product.results_timeline if product else '' }}"
+         placeholder="مثال: تخفيف الحكة من أول ليلة، نتيجة كاملة خلال 2-4 أسابيع">
+
+  <label>نص الإغلاق والإقناع <span class="hint">جملة قوية يقولها البوت لما العميل مش متأكد</span></label>
+  <textarea name="closing_pitch" style="min-height:60px" placeholder="مثال: الدفع عند الاستلام يعني مفيش أي مخاطرة — لو المنتج مش عاجبك ارجعه ومش هتدفع حاجة">{{ product.closing_pitch if product else '' }}</textarea>
+
+  <label>أسئلة شائعة (FAQ) <span class="hint">كل سؤال: "س: ..." ثم الجواب: "ج: ..."</span></label>
+  <textarea name="faq" style="min-height:120px" placeholder="س: هيضر لو عندي سكر؟&#10;ج: المنتج طبيعي 100% لكن ننصح تستشير طبيبك&#10;&#10;س: أقدر أرجعه لو مش عاجبني؟&#10;ج: أيوه، الاسترجاع مضمون 14 يوم" id="f-faq">{{ product_faq_text or '' }}</textarea>
+
+  <label>منتجات مكملة (Cross-Selling) <span class="hint">مفاتيح المنتجات مفصولة بفاصلة — مثال: sleep,eczema</span></label>
+  <input type="text" name="cross_selling"
+         value="{{ product.cross_selling if product else '' }}"
+         placeholder="sleep,numbness">
+
+  <!-- ===== أمان ===== -->
+  <h3 style="color:var(--primary-dark); margin-top:24px">🛡️ أمان وتحذيرات</h3>
   <div class="checkbox-row">
     <input type="checkbox" name="sensitive_area_safe" id="sas" {{ 'checked' if product and product.sensitive_area_safe }}>
-    <label for="sas" style="margin:0">هذا المنتج آمن لاستخدام خاص في منطقة حساسة محددة</label>
+    <label for="sas" style="margin:0">هذا المنتج آمن لاستخدام في منطقة حساسة محددة</label>
   </div>
   <input type="text" name="sensitive_area_note" placeholder="مثال: آمن تحت العين فقط"
          value="{{ product.sensitive_area_note if product else '' }}">
 
   {% if product %}
-  <div class="checkbox-row">
+  <div class="checkbox-row" style="margin-top:14px">
     <input type="checkbox" name="is_active" id="ia" {{ 'checked' if product.is_active }}>
     <label for="ia" style="margin:0">المنتج مفعّل (يظهر للبوت)</label>
   </div>
   {% endif %}
 
-  <div class="form-actions">
+  <div class="form-actions" style="margin-top:24px">
     <button class="btn btn-primary" type="submit">{{ 'حفظ التعديلات' if product else 'إضافة المنتج' }}</button>
     <a class="btn btn-secondary" href="{{ url_for('dashboard.products_list') }}">إلغاء</a>
   </div>
@@ -80,7 +115,7 @@ async function suggestProduct(){
   const input = document.getElementById('ai-short-input').value.trim();
   const btn = event.target;
   const box = document.getElementById('ai-result');
-  if(!input){ alert('اكتب وصف مبدئي للمنتج أولاً'); return; }
+  if(!input){ alert('اكتب وصف مبدئي أولاً'); return; }
 
   btn.disabled = true; btn.textContent = '⏳ جاري التفكير...';
   try{
@@ -90,30 +125,18 @@ async function suggestProduct(){
     });
     const data = await res.json();
     if(data.error){ alert(data.error); return; }
-
     box.innerHTML = `
-      <div class="ai-title">✨ اقتراحات الـ AI — اضغط على أي اقتراح لتطبيقه</div>
-      <div class="ai-suggestion-item">
-        <div class="label">الاسم المقترح</div>
-        ${data.suggested_name} <span class="ai-apply-btn" onclick="applyField('f-name', \`${data.suggested_name}\`)">تطبيق ←</span>
-      </div>
-      <div class="ai-suggestion-item">
-        <div class="label">الوصف المقترح</div>
-        ${data.suggested_description} <span class="ai-apply-btn" onclick="applyField('f-description', \`${data.suggested_description}\`)">تطبيق ←</span>
-      </div>
-      <div class="ai-suggestion-item">
-        <div class="label">كلمات البحث المقترحة</div>
-        ${data.suggested_keywords} <span class="ai-apply-btn" onclick="applyField('f-keywords', \`${data.suggested_keywords}\`)">تطبيق ←</span>
-      </div>`;
+      <div class="ai-title">✨ اقتراحات الـ AI</div>
+      <div class="ai-suggestion-item"><div class="label">الاسم</div>${data.suggested_name}
+        <span class="ai-apply-btn" onclick="applyField('f-name',\`${data.suggested_name}\`)">تطبيق ←</span></div>
+      <div class="ai-suggestion-item"><div class="label">الوصف</div>${data.suggested_description}
+        <span class="ai-apply-btn" onclick="applyField('f-description',\`${data.suggested_description}\`)">تطبيق ←</span></div>
+      <div class="ai-suggestion-item"><div class="label">كلمات البحث</div>${data.suggested_keywords}
+        <span class="ai-apply-btn" onclick="applyField('f-keywords',\`${data.suggested_keywords}\`)">تطبيق ←</span></div>`;
     box.classList.add('show');
-  }catch(e){
-    alert('حصل خطأ، حاول تاني');
-  }finally{
-    btn.disabled = false; btn.textContent = '✨ اقترح لي التفاصيل';
-  }
+  }catch(e){ alert('حصل خطأ، حاول تاني'); }
+  finally{ btn.disabled=false; btn.textContent='✨ اقترح لي التفاصيل'; }
 }
-function applyField(id, value){
-  document.getElementById(id).value = value;
-}
+function applyField(id, value){ document.getElementById(id).value = value; }
 </script>
 {% endblock %}

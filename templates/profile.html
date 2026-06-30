@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}الإعدادات الشخصية{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">الإعدادات الشخصية</h1>
+  <p class="page-sub">بيانات حسابك وإعدادات التحليلات</p>
+</div>
+
+<div class="card">
+  <h3>👤 بيانات الحساب</h3>
+  <p style="font-size:14px; color:var(--text-soft)">الإيميل: <strong>{{ user.email }}</strong></p>
+</div>
+
+<div class="card">
+  <h3>📊 مفتاح التحليلات</h3>
+  <p class="page-sub" style="margin-bottom:12px">
+    بعد ما تحط المفتاح هنا، أيقونة "التحليلات" في القائمة الجانبية هتفتح لوحة التحليلات تلقائياً بدون ما تكتب المفتاح كل مرة.
+  </p>
+  <div style="background:var(--warn-bg); border-radius:10px; padding:12px 16px; margin-bottom:16px; font-size:13px; color:var(--warn)">
+    ⚠️ المفتاح ده هو نفس قيمة <code>ANALYTICS_KEY</code> في الـ Railway Variables بتاعك.
+  </div>
+  <form method="POST">
+    <label>مفتاح التحليلات (ANALYTICS_KEY)</label>
+    <input type="text" name="analytics_key"
+           value="{{ user.analytics_key or '' }}"
+           placeholder="مثال: mySecretKey123">
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">حفظ</button>
+      {% if user.analytics_key %}
+      <a class="btn btn-secondary" href="{{ url_for('analytics.tenant_analytics', tenant_slug=tenant.slug, key=user.analytics_key) }}" target="_blank">
+        🔗 فتح التحليلات
+      </a>
+      {% endif %}
+    </div>
+  </form>
+</div>
+{% endblock %}

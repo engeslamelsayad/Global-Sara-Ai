@@ -14,11 +14,31 @@ from flask_login import login_required, current_user
 
 from models import (
     db, Tenant, Product, Policy, BotConfig, Keyword, BotAppId,
-    FollowupStage, Page, Order,
+    FollowupStage, Page, Order, SmartRule,
 )
 from auth import login_required_dashboard
 from bot_engine import invalidate_tenant_cache
 import ai_assist
+
+import json as _json
+
+def _parse_features(raw):
+    """يحوّل نص أسطر لـ JSON list من المميزات"""
+    items = [l.strip().lstrip("•-").strip() for l in raw.split("\n") if l.strip()]
+    return _json.dumps(items, ensure_ascii=False)
+
+def _parse_faq(raw):
+    """يحوّل نص س/ج لـ JSON list — كل سطر س: ... ثم ج: ..."""
+    pairs, current_q = [], None
+    for line in raw.split("\n"):
+        line = line.strip()
+        if line.lower().startswith("س:") or line.startswith("سؤال:"):
+            current_q = line.split(":", 1)[1].strip()
+        elif (line.lower().startswith("ج:") or line.startswith("جواب:")) and current_q:
+            pairs.append({"q": current_q, "a": line.split(":", 1)[1].strip()})
+            current_q = None
+    return _json.dumps(pairs, ensure_ascii=False)
+
 
 dashboard_bp = Blueprint("dashboard", __name__, url_prefix="/dashboard")
 
@@ -64,6 +84,7 @@ def products_list():
 def product_new():
     tenant = _current_tenant()
     if request.method == "POST":
+        # الحقول الأساسية
         product = Product(
             tenant_id=tenant.id,
             product_key=request.form["product_key"].strip(),
@@ -77,6 +98,13 @@ def product_new():
             product_link=request.form.get("product_link", "").strip(),
             sensitive_area_safe=bool(request.form.get("sensitive_area_safe")),
             sensitive_area_note=request.form.get("sensitive_area_note", "").strip(),
+            # الحقول الجديدة
+            features=_parse_features(request.form.get("features", "")),
+            who_benefits=request.form.get("who_benefits", "").strip(),
+            results_timeline=request.form.get("results_timeline", "").strip(),
+            faq=_parse_faq(request.form.get("faq", "")),
+            cross_selling=request.form.get("cross_selling", "").strip(),
+            closing_pitch=request.form.get("closing_pitch", "").strip(),
         )
         db.session.add(product)
         db.session.commit()
@@ -84,7 +112,8 @@ def product_new():
         flash(f"تمت إضافة المنتج '{product.name}' بنجاح ✅", "success")
         return redirect(url_for("dashboard.products_list"))
 
-    return render_template("product_form.html", tenant=tenant, product=None)
+    return render_template("product_form.html", tenant=tenant, product=None,
+                           product_features_text="", product_faq_text="")
 
 
 @dashboard_bp.route("/products/<product_id>/edit", methods=["GET", "POST"])
@@ -105,13 +134,26 @@ def product_edit(product_id):
         product.product_link  = request.form.get("product_link", "").strip()
         product.sensitive_area_safe = bool(request.form.get("sensitive_area_safe"))
         product.sensitive_area_note = request.form.get("sensitive_area_note", "").strip()
-        product.is_active     = bool(request.form.get("is_active"))
+        product.features         = _parse_features(request.form.get("features", ""))
+        product.who_benefits     = request.form.get("who_benefits", "").strip()
+        product.results_timeline = request.form.get("results_timeline", "").strip()
+        product.faq              = _parse_faq(request.form.get("faq", ""))
+        product.cross_selling    = request.form.get("cross_selling", "").strip()
+        product.closing_pitch    = request.form.get("closing_pitch", "").strip()
+        product.is_active        = bool(request.form.get("is_active"))
         db.session.commit()
         _invalidate(tenant)
         flash("تم تحديث المنتج بنجاح ✅", "success")
         return redirect(url_for("dashboard.products_list"))
 
-    return render_template("product_form.html", tenant=tenant, product=product)
+    import json as _j
+    feats_text = "\n".join(_j.loads(product.features or "[]"))
+    faqs_text  = "\n".join(
+        f"س: {item['q']}\nج: {item['a']}"
+        for item in _j.loads(product.faq or "[]")
+    )
+    return render_template("product_form.html", tenant=tenant, product=product,
+                           product_features_text=feats_text, product_faq_text=faqs_text)
 
 
 @dashboard_bp.route("/products/<product_id>/delete", methods=["POST"])
@@ -423,3 +465,73 @@ def orders_list():
     tenant = _current_tenant()
     orders = Order.query.filter_by(tenant_id=tenant.id).order_by(Order.created_at.desc()).limit(100).all()
     return render_template("orders.html", tenant=tenant, orders=orders)
+
+
+# =====================================================================
+# SMART RULES — قواعد ذكية مخصصة
+# =====================================================================
+@dashboard_bp.route("/smart-rules")
+@login_required_dashboard
+def smart_rules_list():
+    tenant = _current_tenant()
+    rules = SmartRule.query.filter_by(tenant_id=tenant.id).order_by(SmartRule.created_at).all()
+    return render_template("smart_rules.html", tenant=tenant, rules=rules)
+
+
+@dashboard_bp.route("/smart-rules/add", methods=["POST"])
+@login_required_dashboard
+def smart_rule_add():
+    tenant = _current_tenant()
+    rule_text = request.form.get("rule_text", "").strip()
+    category  = request.form.get("category", "custom")
+    if rule_text:
+        db.session.add(SmartRule(
+            tenant_id=tenant.id, rule_text=rule_text, category=category
+        ))
+        db.session.commit()
+        _invalidate(tenant)
+        flash("تمت إضافة القاعدة ✅", "success")
+    return redirect(url_for("dashboard.smart_rules_list"))
+
+
+@dashboard_bp.route("/smart-rules/<rule_id>/toggle", methods=["POST"])
+@login_required_dashboard
+def smart_rule_toggle(rule_id):
+    tenant = _current_tenant()
+    rule = SmartRule.query.filter_by(id=rule_id, tenant_id=tenant.id).first_or_404()
+    rule.is_active = not rule.is_active
+    db.session.commit()
+    _invalidate(tenant)
+    return redirect(url_for("dashboard.smart_rules_list"))
+
+
+@dashboard_bp.route("/smart-rules/<rule_id>/delete", methods=["POST"])
+@login_required_dashboard
+def smart_rule_delete(rule_id):
+    tenant = _current_tenant()
+    rule = SmartRule.query.filter_by(id=rule_id, tenant_id=tenant.id).first_or_404()
+    db.session.delete(rule)
+    db.session.commit()
+    _invalidate(tenant)
+    flash("تم حذف القاعدة", "success")
+    return redirect(url_for("dashboard.smart_rules_list"))
+
+
+# =====================================================================
+# PROFILE — مفتاح التحليلات
+# =====================================================================
+@dashboard_bp.route("/profile", methods=["GET", "POST"])
+@login_required_dashboard
+def profile():
+    from flask_login import current_user
+    from models import User
+    user = User.query.get(current_user.id)
+    tenant = _current_tenant()
+
+    if request.method == "POST":
+        user.analytics_key = request.form.get("analytics_key", "").strip()
+        db.session.commit()
+        flash("تم حفظ مفتاح التحليلات ✅", "success")
+        return redirect(url_for("dashboard.profile"))
+
+    return render_template("profile.html", tenant=tenant, user=user)

@@ -130,8 +130,8 @@
   <a class="nav-link {{ 'active' if request.endpoint=='dashboard.home' }}" href="{{ url_for('dashboard.home') }}">
     <span class="nav-icon">🏠</span> الرئيسية
   </a>
-  <a class="nav-link" href="{{ url_for('analytics.tenant_analytics', tenant_slug=tenant.slug, key=request.args.get('key','')) if tenant else '#' }}">
-    <span class="nav-icon">📊</span> التحليلات
+  <a class="nav-link" href="{{ url_for('analytics.tenant_analytics', tenant_slug=tenant.slug, key=current_user.analytics_key or '') if tenant and current_user.analytics_key else url_for('dashboard.profile') }}" target="{{ '_blank' if current_user.analytics_key else '_self' }}">
+    <span class="nav-icon">📊</span> التحليلات{% if not current_user.analytics_key %} <span style="font-size:10px;color:var(--warn)">⚙ اضبط المفتاح</span>{% endif %}
   </a>
   <a class="nav-link {{ 'active' if request.endpoint=='dashboard.orders_list' }}" href="{{ url_for('dashboard.orders_list') }}">
     <span class="nav-icon">🧾</span> الطلبات
@@ -155,6 +155,9 @@
   <a class="nav-link {{ 'active' if request.endpoint=='dashboard.keywords_list' }}" href="{{ url_for('dashboard.keywords_list') }}">
     <span class="nav-icon">🔑</span> الكلمات المفتاحية
   </a>
+  <a class="nav-link {{ 'active' if request.endpoint=='dashboard.smart_rules_list' }}" href="{{ url_for('dashboard.smart_rules_list') }}">
+    <span class="nav-icon">⚡</span> القواعد الذكية
+  </a>
   <a class="nav-link {{ 'active' if request.endpoint=='dashboard.followups_list' }}" href="{{ url_for('dashboard.followups_list') }}">
     <span class="nav-icon">📬</span> رسائل المتابعة
   </a>
@@ -162,6 +165,7 @@
     <span class="nav-icon">🔗</span> الصفحات المربوطة
   </a>
 
+  <a class="logout-link {{ 'active' if request.endpoint=='dashboard.profile' }}" href="{{ url_for('dashboard.profile') }}" style="color:var(--text-soft)">⚙ الإعدادات الشخصية</a>
   <a class="logout-link" href="{{ url_for('auth.logout') }}">↩ تسجيل الخروج</a>
 </nav>
 {% endif %}

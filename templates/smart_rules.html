@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}القواعد الذكية{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">القواعد الذكية ⚡</h1>
+  <p class="page-sub">قواعد بتكتبها بكلامك العادي — البوت بيطبّقها تلقائياً في كل محادثة</p>
+</div>
+
+<div class="card" style="border:1px solid #DDD0F8; background:linear-gradient(135deg,#FBF9FF,#F4EEFF); margin-bottom:20px">
+  <h3 style="margin-top:0">💡 أمثلة على قواعد مفيدة</h3>
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px">
+    {% for ex in [
+      ('مبيعات','لو العميل قال إنه في الرياض قوليله التوصيل 24 ساعة بدل 3 أيام'),
+      ('مبيعات','لو سأل عن الضمان قوليله الضمان سنة كاملة من تاريخ الشراء'),
+      ('سلوك','لا تذكري أي منافس بالاسم — لو ذكره العميل قارني بالفائدة مش بالسعر'),
+      ('سلوك','لو العميل قال إنه اشترى قبل كده ولم يجيه المنتج حوليه لموظف بشري فوراً'),
+      ('أمان','لو العميل قال إنه حامل لا تكملي البيع ونصحيها بالطبيب'),
+      ('مبيعات','لو العميل عرض سعر أقل من السعر المعتمد لا تقبلي وأكدي إن السعر نهائي'),
+    ] %}
+    <div onclick="fillRule('{{ ex[1] }}')" style="cursor:pointer; padding:8px 12px; background:#fff; border-radius:8px; border:1px solid #DDD0F8; font-size:12px; transition:.15s" onmouseover="this.style.borderColor='#6D28D9'" onmouseout="this.style.borderColor='#DDD0F8'">
+      <span style="color:var(--primary-dark); font-weight:700; font-size:11px">{{ ex[0] }} ←</span><br>{{ ex[1] }}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="card">
+  <h3>+ إضافة قاعدة جديدة</h3>
+  <form method="POST" action="{{ url_for('dashboard.smart_rule_add') }}">
+    <label>نص القاعدة <span class="hint">اكتب بكلامك العادي — البوت هيفهم</span></label>
+    <textarea name="rule_text" id="rule-input" required style="min-height:70px" placeholder="مثال: لو العميل سأل عن التقسيط قوليله مش متاح حالياً"></textarea>
+    <div style="display:flex; gap:10px; align-items:center; margin-top:10px">
+      <select name="category" style="width:150px">
+        <option value="sales">🛒 مبيعات</option>
+        <option value="safety">🛡️ أمان</option>
+        <option value="behavior">🤖 سلوك</option>
+        <option value="custom">⚙️ أخرى</option>
+      </select>
+      <button class="btn btn-primary" type="submit">إضافة القاعدة</button>
+    </div>
+  </form>
+</div>
+
+<div class="card" style="padding:0; overflow:hidden">
+  {% if rules %}
+  <table>
+    <thead><tr><th>القاعدة</th><th>النوع</th><th>الحالة</th><th></th></tr></thead>
+    <tbody>
+      {% for r in rules %}
+      <tr style="{{ 'opacity:0.5' if not r.is_active }}">
+        <td style="font-size:13px; max-width:500px">{{ r.rule_text }}</td>
+        <td>
+          {% set cat_map = {'sales':'🛒 مبيعات','safety':'🛡️ أمان','behavior':'🤖 سلوك','custom':'⚙️ أخرى'} %}
+          <span class="badge badge-purple">{{ cat_map.get(r.category, r.category) }}</span>
+        </td>
+        <td>
+          {% if r.is_active %}<span class="badge badge-green">مفعّل</span>
+          {% else %}<span class="badge badge-red">موقوف</span>{% endif %}
+        </td>
+        <td style="text-align:left; white-space:nowrap">
+          <form method="POST" action="{{ url_for('dashboard.smart_rule_toggle', rule_id=r.id) }}" style="display:inline">
+            <button class="btn btn-secondary btn-sm" type="submit">{{ 'إيقاف' if r.is_active else 'تفعيل' }}</button>
+          </form>
+          <form method="POST" action="{{ url_for('dashboard.smart_rule_delete', rule_id=r.id) }}" style="display:inline"
+                onsubmit="return confirm('حذف هذه القاعدة؟')">
+            <button class="btn btn-danger btn-sm" type="submit">حذف</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state"><p>لسه مفيش قواعد. اضغط على أي مثال فوق لتجربة إضافة قاعدة.</p></div>
+  {% endif %}
+</div>
+
+<script>
+function fillRule(text) {
+  document.getElementById('rule-input').value = text;
+  document.getElementById('rule-input').scrollIntoView({behavior:'smooth'});
+  document.getElementById('rule-input').focus();
+}
+</script>
+{% endblock %}

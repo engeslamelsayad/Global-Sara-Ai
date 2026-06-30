@@ -56,6 +56,8 @@ class Tenant(db.Model):
     followups     = db.relationship("FollowupStage",  backref="tenant", cascade="all, delete-orphan",
                                      order_by="FollowupStage.stage_number")
     orders        = db.relationship("Order",          backref="tenant", cascade="all, delete-orphan")
+    smart_rules   = db.relationship("SmartRule",      backref="tenant", cascade="all, delete-orphan",
+                                     order_by="SmartRule.created_at")
 
     def to_dict(self):
         return {
@@ -79,6 +81,7 @@ class User(db.Model):
     password_hash = db.Column(db.String(300), nullable=False)
     full_name     = db.Column(db.String(150))
     role          = db.Column(db.String(20), default="owner")
+    analytics_key = db.Column(db.String(100))   # مفتاح التحليلات — بيتحفظ للمستخدم يدخله مرة واحدة
     created_at    = db.Column(db.DateTime, default=datetime.utcnow)
 
     def set_password(self, raw_password):
@@ -261,6 +264,14 @@ class Product(db.Model):
     sensitive_area_safe = db.Column(db.Boolean, default=False)
     sensitive_area_note = db.Column(db.String(300))
 
+    # ── حقول المحتوى التسويقي الجديدة ──
+    features          = db.Column(db.Text)   # JSON list: ["ميزة 1", "ميزة 2"]
+    who_benefits      = db.Column(db.Text)   # من يستفيد
+    results_timeline  = db.Column(db.Text)   # متى تظهر النتيجة
+    faq               = db.Column(db.Text)   # JSON list: [{"q":"سؤال","a":"جواب"}]
+    cross_selling     = db.Column(db.Text)   # منتجات مكملة (مفصولة بفاصلة: key1,key2)
+    closing_pitch     = db.Column(db.Text)   # نص إغلاق البيع
+
     is_active     = db.Column(db.Boolean, default=True)
     created_at    = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at    = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -342,3 +353,34 @@ class Order(db.Model):
             "product_name": self.product_name, "discount_code": self.discount_code,
             "created_at": self.created_at.strftime("%Y-%m-%d %H:%M"),
         }
+
+
+# =====================================================================
+# SMART RULE — قواعد ذكية مخصصة يضيفها مالك البزنس بحرية
+# =====================================================================
+class SmartRule(db.Model):
+    """
+    قاعدة ذكية بلغة طبيعية يكتبها مالك البزنس — بتتحقن في الـ system prompt مباشرةً.
+    
+    أمثلة:
+      - "لو العميل قال إنه في الرياض قوليله التوصيل 24 ساعة بدل 3 أيام"
+      - "لو سأل عن الضمان قوليله الضمان سنة كاملة من تاريخ الشراء"
+      - "لا تذكري أي منافس بالاسم — لو العميل ذكر منافس قارني بالفايدة مش بالسعر"
+    
+    category القيم: sales / safety / behavior / custom
+    """
+    __tablename__ = "smart_rules"
+
+    id          = db.Column(db.String(36), primary_key=True, default=gen_uuid)
+    tenant_id   = db.Column(db.String(36), db.ForeignKey("tenants.id"), nullable=False, index=True)
+    rule_text   = db.Column(db.Text, nullable=False)
+    category    = db.Column(db.String(40), default="custom")
+    is_active   = db.Column(db.Boolean, default=True)
+    created_at  = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id, "rule_text": self.rule_text,
+            "category": self.category, "is_active": self.is_active,
+        }
+

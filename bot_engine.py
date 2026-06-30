@@ -221,6 +221,21 @@ def build_system_prompt(bundle, matched_product=None, state=None):
     forbidden_words_txt = "، ".join(forbidden_words) if forbidden_words else "لا يوجد"
     forbidden_openers_txt = "\n".join(f'- "{o}"' for o in forbidden_openers) or "لا يوجد"
 
+    from models import SmartRule
+    active_rules = SmartRule.query.filter_by(
+        tenant_id=tenant.id, is_active=True
+    ).order_by(SmartRule.created_at).all()
+
+    smart_rules_txt = ""
+    if active_rules:
+        rules_by_cat = {}
+        for r in active_rules:
+            rules_by_cat.setdefault(r.category, []).append(r.rule_text)
+        smart_rules_txt = "\n[قواعد ذكية مخصصة — التزمي بها]\n"
+        for cat, rules in rules_by_cat.items():
+            for rule in rules:
+                smart_rules_txt += f"- {rule}\n"
+
     static_prompt = f"""أنت {bc.bot_name}، {bc.bot_persona}.
 عمرك {bc.bot_age} سنة. بتتكلم بلهجة {bc.dialect} بنبرة {bc.tone}.
 
@@ -258,6 +273,7 @@ def build_system_prompt(bundle, matched_product=None, state=None):
 {"هذا الرقم للواتساب فقط — مش للمكالمات" if bc.contact_channel == "whatsapp" else ""}
 لا تذكري أي رقم آخر أبداً تحت أي ظرف
 
+{smart_rules_txt}
 [كل المنتجات المتاحة]
 {products_block}
 
@@ -274,13 +290,39 @@ def build_system_prompt(bundle, matched_product=None, state=None):
     dynamic_parts = []
 
     if matched_product:
-        dynamic_parts.append(
+        import json as _json
+        features_list  = _json.loads(matched_product.features or "[]")
+        faq_list       = _json.loads(matched_product.faq or "[]")
+        features_txt   = "\n".join(f"  • {f}" for f in features_list) if features_list else ""
+        faq_txt        = "\n".join(f"  س: {item['q']}\n  ج: {item['a']}" for item in faq_list) if faq_list else ""
+
+        prod_block = (
             f"⚠️ المنتج المقصود في رسالة العميل الحالية:\n"
-            f"{matched_product.name}\n"
-            f"الوصف: {matched_product.description}\n"
-            f"السعر الدقيق: {matched_product.price_note}\n"
-            f"استخدمي هذا السعر فقط، لا تخمّني سعراً آخر."
+            f"الاسم: {matched_product.name}\n"
+            f"الوصف: {matched_product.description or ''}\n"
+            f"السعر الدقيق: {matched_product.price_note} — استخدمي هذا السعر فقط.\n"
         )
+        if features_txt:
+            prod_block += f"المميزات الرئيسية:\n{features_txt}\n"
+        if matched_product.who_benefits:
+            prod_block += f"من يستفيد: {matched_product.who_benefits}\n"
+        if matched_product.results_timeline:
+            prod_block += f"متى تظهر النتيجة: {matched_product.results_timeline}\n"
+        if matched_product.closing_pitch:
+            prod_block += f"نص إغلاق البيع: {matched_product.closing_pitch}\n"
+        if faq_txt:
+            prod_block += f"أسئلة شائعة:\n{faq_txt}\n"
+        if matched_product.cross_selling:
+            cross_names = []
+            for ck in matched_product.cross_selling.split(","):
+                ck = ck.strip()
+                cp = next((p for p in products if p.product_key == ck), None)
+                if cp:
+                    cross_names.append(cp.name)
+            if cross_names:
+                prod_block += f"منتجات مكملة يمكن اقتراحها: {', '.join(cross_names)}\n"
+
+        dynamic_parts.append(prod_block)
 
         if policy and policy.enable_sensitive_area_warning:
             if matched_product.sensitive_area_safe:
