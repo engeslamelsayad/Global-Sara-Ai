@@ -1,0 +1,4 @@
+# أضف الأسطر دي لـ requirements.txt الحالي بتاعك
+flask-sqlalchemy
+psycopg2-binary
+werkzeug
