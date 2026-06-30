@@ -1,0 +1,90 @@
+"""
+migrate_add_columns.py — يضيف الأعمدة الجديدة لقاعدة البيانات الموجودة
+
+المشكلة: db.create_all() بيعمل جداول جديدة فقط — مش بيعدّل جداول موجودة.
+الحل: نضيف الأعمدة الناقصة يدوياً بـ ALTER TABLE (آمن — بيتجاهل لو العمود موجود).
+
+التشغيل مرة واحدة من Railway Shell:
+    python migrate_add_columns.py
+"""
+
+import os
+from flask import Flask
+from db_init import init_db
+from models import db
+
+app = Flask(__name__)
+init_db(app)
+
+def safe_alter(conn, sql, label=None):
+    """ينفّذ SQL ويتجاهل خطأ لو العمود/الجدول موجود بالفعل"""
+    label = label or sql[:60]
+    try:
+        conn.execute(db.text(sql))
+        print(f"  ✅ {label}")
+        return True
+    except Exception as e:
+        err = str(e).lower()
+        # خطأ "already exists" = عادي — يعني العمود موجود من قبل
+        if any(kw in err for kw in ["already exists", "duplicate column", "duplicate"]):
+            print(f"  ⏭  {label} (موجود بالفعل)")
+            return True
+        print(f"  ❌ {label}\n     {str(e)[:120]}")
+        return False
+
+def run():
+    with app.app_context():
+        is_pg = "postgresql" in str(db.engine.url) or "postgres" in str(db.engine.url)
+        print(f"Database: {'PostgreSQL ✅' if is_pg else 'SQLite (تطوير محلي)'}\n")
+
+        conn = db.engine.connect()
+        ok_all = True
+
+        print("=== 1. جدول users ===")
+        ok_all &= safe_alter(conn,
+            "ALTER TABLE users ADD COLUMN analytics_key VARCHAR(100)",
+            "users.analytics_key")
+
+        print("\n=== 2. جدول products (الحقول الجديدة) ===")
+        for col, typ in [
+            ("features",         "TEXT"),
+            ("who_benefits",     "TEXT"),
+            ("results_timeline", "TEXT"),
+            ("faq",              "TEXT"),
+            ("cross_selling",    "TEXT"),
+            ("closing_pitch",    "TEXT"),
+        ]:
+            ok_all &= safe_alter(conn,
+                f"ALTER TABLE products ADD COLUMN {col} {typ}",
+                f"products.{col}")
+
+        print("\n=== 3. جدول smart_rules (جديد) ===")
+        if is_pg:
+            ok_all &= safe_alter(conn, """
+                CREATE TABLE IF NOT EXISTS smart_rules (
+                    id         VARCHAR(36) PRIMARY KEY,
+                    tenant_id  VARCHAR(36) NOT NULL REFERENCES tenants(id),
+                    rule_text  TEXT NOT NULL,
+                    category   VARCHAR(40) DEFAULT 'custom',
+                    is_active  BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT NOW()
+                )""", "smart_rules table")
+            ok_all &= safe_alter(conn,
+                "CREATE INDEX IF NOT EXISTS ix_smart_rules_tenant ON smart_rules(tenant_id)",
+                "smart_rules index")
+        else:
+            # SQLite: db.create_all() ينشئ الجداول الجديدة تلقائياً
+            print("  ⏭  SQLite: smart_rules ستُنشأ بـ db.create_all() تلقائياً")
+
+        conn.commit()
+        conn.close()
+
+        print()
+        if ok_all:
+            print("🎉 كل الـ migrations اكتملت بنجاح!")
+            print("   الخطوة التالية: Railway بيعمل restart تلقائي — جرّب تسجيل الدخول دلوقتي.")
+        else:
+            print("⚠️  في بعض الأخطاء — راجع الرسائل فوق")
+
+if __name__ == "__main__":
+    run()
