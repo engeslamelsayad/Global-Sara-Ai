@@ -184,8 +184,24 @@ def build_analytics_html(tenant, data):
 # =====================================================================
 @analytics_bp.route("/analytics/<tenant_slug>")
 def tenant_analytics(tenant_slug):
-    if request.args.get("key") != ANALYTICS_KEY:
-        return "Unauthorized — add ?key=YOUR_ANALYTICS_KEY", 403
+    from flask_login import current_user
+    from models import User
+
+    # ── طريقة 1: مفتاح API عام (للأدمن أو الوصول الخارجي) ──
+    if request.args.get("key") == ANALYTICS_KEY:
+        pass  # مسموح
+
+    # ── طريقة 2: مستخدم مسجّل دخوله ينظر في تحليلات الـ tenant بتاعه ──
+    elif current_user and current_user.is_authenticated:
+        # تأكد إن الـ tenant slug بتاع الـ user هو نفسه المطلوب
+        from models import Tenant as T
+        user_tenant = T.query.get(current_user.tenant_id)
+        if not user_tenant or user_tenant.slug != tenant_slug:
+            return "غير مصرح — يمكنك فقط عرض تحليلات شركتك", 403
+        # مسموح — اليوزر المسجّل بيشوف تحليلاته
+
+    else:
+        return "Unauthorized — سجّل دخولك أو أضف ?key=ANALYTICS_KEY", 403
 
     tenant = Tenant.query.filter_by(slug=tenant_slug).first()
     if not tenant:
