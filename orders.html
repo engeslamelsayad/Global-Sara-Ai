@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}الطلبات{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">الطلبات</h1>
+  <p class="page-sub">آخر 100 طلب مسجّل من البوت</p>
+</div>
+
+<div class="card" style="padding:0; overflow:hidden">
+  {% if orders %}
+  <table>
+    <thead><tr><th>الاسم</th><th>الموبايل</th><th>المنتج</th><th>الخصم</th><th>التاريخ</th></tr></thead>
+    <tbody>
+      {% for o in orders %}
+      <tr>
+        <td>{{ o.customer_name or '—' }}</td>
+        <td style="direction:ltr; text-align:right">{{ o.customer_phone or '—' }}</td>
+        <td>{{ o.product_name or '—' }}</td>
+        <td>{% if o.discount_code %}<span class="badge badge-green">{{ o.discount_code }}</span>{% else %}—{% endif %}</td>
+        <td style="color:var(--text-soft); font-size:13px">{{ o.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state"><p>لسه مفيش طلبات</p></div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}السياسات{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">سياسات البزنس</h1>
+  <p class="page-sub">قواعد الدفع والتوصيل والاسترجاع — البوت بيلتزم بيها حرفياً</p>
+</div>
+
+<form method="POST" class="card">
+  <label>طريقة الدفع</label>
+  <input type="text" name="payment_method" value="{{ policy.payment_method }}">
+
+  <label>مدة التوصيل</label>
+  <input type="text" name="delivery_days" value="{{ policy.delivery_days }}">
+
+  <label>سياسة الاسترجاع</label>
+  <textarea name="return_policy">{{ policy.return_policy }}</textarea>
+
+  <label>سياسة الاستبدال</label>
+  <textarea name="exchange_policy">{{ policy.exchange_policy }}</textarea>
+
+  <label>سياسة المعاينة قبل الدفع</label>
+  <textarea name="inspection_policy">{{ policy.inspection_policy }}</textarea>
+
+  <h3 style="margin-top:24px">قواعد ذكية</h3>
+  <div class="checkbox-row">
+    <input type="checkbox" name="enable_sensitive_area_warning" id="esaw" {{ 'checked' if policy.enable_sensitive_area_warning }}>
+    <label for="esaw" style="margin:0">تفعيل تحذير المناطق الحساسة (وجه/إبط/مناطق تناسلية)</label>
+  </div>
+  <div class="checkbox-row">
+    <input type="checkbox" name="enable_chronic_disease_warning" id="ecdw" {{ 'checked' if policy.enable_chronic_disease_warning }}>
+    <label for="ecdw" style="margin:0">تفعيل تحذير الأمراض المزمنة (قلب/سكر/ضغط)</label>
+  </div>
+  <div class="checkbox-row">
+    <input type="checkbox" name="enable_followup" id="efu" {{ 'checked' if policy.enable_followup }}>
+    <label for="efu" style="margin:0">تفعيل رسائل المتابعة التلقائية</label>
+  </div>
+  <div class="checkbox-row">
+    <input type="checkbox" name="enable_installments" id="ei" {{ 'checked' if policy.enable_installments }}>
+    <label for="ei" style="margin:0">يوجد نظام تقسيط (لو مفعّل، البوت يقدر يذكره)</label>
+  </div>
+
+  <div class="form-actions">
+    <button class="btn btn-primary" type="submit">حفظ التعديلات</button>
+  </div>
+</form>
+{% endblock %}

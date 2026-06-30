@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}المنتجات{% endblock %}
+{% block content %}
+<div class="page-header" style="display:flex; justify-content:space-between; align-items:center">
+  <div>
+    <h1 class="page-title">المنتجات</h1>
+    <p class="page-sub">كل منتج هنا هو اللي البوت بيعرضه ويبيعه لعملائك</p>
+  </div>
+  <a class="btn btn-primary" href="{{ url_for('dashboard.product_new') }}">+ منتج جديد</a>
+</div>
+
+<div class="card" style="padding:0; overflow:hidden">
+  {% if products %}
+  <table>
+    <thead><tr><th>الاسم</th><th>السعر</th><th>الحالة</th><th></th></tr></thead>
+    <tbody>
+      {% for p in products %}
+      <tr>
+        <td>
+          <strong>{{ p.name }}</strong><br>
+          <span style="color:var(--text-soft); font-size:12px">{{ p.product_key }}</span>
+        </td>
+        <td>{{ p.price_note or (p.price_amount ~ ' ج') }}</td>
+        <td>
+          {% if p.is_active %}<span class="badge badge-green">مفعّل</span>
+          {% else %}<span class="badge badge-red">معطّل</span>{% endif %}
+          {% if p.sensitive_area_safe %}<span class="badge badge-purple">آمن خاص</span>{% endif %}
+        </td>
+        <td style="text-align:left">
+          <a class="btn btn-secondary btn-sm" href="{{ url_for('dashboard.product_edit', product_id=p.id) }}">تعديل</a>
+          <form method="POST" action="{{ url_for('dashboard.product_delete', product_id=p.id) }}" style="display:inline"
+                onsubmit="return confirm('متأكد من حذف هذا المنتج؟')">
+            <button class="btn btn-danger btn-sm" type="submit">حذف</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">
+    <p style="font-size:16px; font-weight:700">لسه مفيش منتجات</p>
+    <p style="margin-bottom:16px">ابدأ بإضافة أول منتج عشان البوت يقدر يرد على عملائك</p>
+    <a class="btn btn-primary" href="{{ url_for('dashboard.product_new') }}">+ إضافة منتج</a>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

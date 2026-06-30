@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}الداشبورد{% endblock %} — {{ tenant.business_name if tenant else 'منصة سارة' }}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#FAFAF7; --surface:#FFFFFF; --border:#E7E2D8;
+    --primary:#6D28D9; --primary-dark:#5B21B6; --primary-light:#EDE6FB;
+    --text:#1F2A1F; --text-soft:#6B6558;
+    --success:#15803D; --success-bg:#EAF6EE;
+    --danger:#DC2626; --danger-bg:#FDEDED;
+    --warn:#B45309; --warn-bg:#FEF3E2;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; font-family:'Tajawal',sans-serif; background:var(--bg); color:var(--text);
+    display:flex; min-height:100vh;
+  }
+  a{color:inherit; text-decoration:none}
+
+  /* ===== Sidebar ===== */
+  .sidebar{
+    width:240px; background:var(--surface); border-left:1px solid var(--border);
+    padding:24px 16px; position:sticky; top:0; height:100vh; flex-shrink:0;
+  }
+  .brand{font-size:20px; font-weight:900; color:var(--primary-dark); margin-bottom:4px}
+  .brand-sub{font-size:12px; color:var(--text-soft); margin-bottom:28px}
+  .nav-section{font-size:11px; color:var(--text-soft); font-weight:700; margin:18px 8px 8px; letter-spacing:.5px}
+  .nav-link{
+    display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:10px;
+    font-size:14px; font-weight:500; color:var(--text); margin-bottom:2px; transition:.15s;
+  }
+  .nav-link:hover{background:var(--primary-light); color:var(--primary-dark)}
+  .nav-link.active{background:var(--primary); color:#fff; font-weight:700}
+  .nav-icon{width:18px; text-align:center}
+  .logout-link{display:block; margin-top:24px; font-size:13px; color:var(--text-soft); padding:8px 12px}
+  .logout-link:hover{color:var(--danger)}
+
+  /* ===== Main ===== */
+  .main{flex:1; padding:32px 40px; max-width:920px}
+  .page-header{margin-bottom:28px}
+  .page-title{font-size:26px; font-weight:900; margin:0 0 4px}
+  .page-sub{font-size:14px; color:var(--text-soft); margin:0}
+
+  /* ===== Cards & Forms ===== */
+  .card{background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:24px; margin-bottom:20px}
+  .card h3{margin-top:0; font-size:16px; font-weight:700}
+  label{display:block; font-size:13px; font-weight:700; color:var(--text); margin:14px 0 6px}
+  label .hint{font-weight:400; color:var(--text-soft); font-size:12px}
+  input[type=text], input[type=number], input[type=email], input[type=password], input[type=url], textarea, select{
+    width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:10px;
+    font-family:inherit; font-size:14px; background:#fff; color:var(--text);
+  }
+  input:focus, textarea:focus, select:focus{outline:2px solid var(--primary); outline-offset:1px; border-color:var(--primary)}
+  textarea{resize:vertical; min-height:80px}
+  .checkbox-row{display:flex; align-items:center; gap:8px; margin:14px 0}
+  .checkbox-row input{width:auto}
+  .checkbox-row label{margin:0}
+
+  /* ===== Buttons ===== */
+  .btn{
+    display:inline-flex; align-items:center; gap:6px; padding:10px 18px; border-radius:10px;
+    font-family:inherit; font-size:14px; font-weight:700; cursor:pointer; border:none; transition:.15s;
+  }
+  .btn-primary{background:var(--primary); color:#fff}
+  .btn-primary:hover{background:var(--primary-dark)}
+  .btn-secondary{background:#fff; color:var(--text); border:1px solid var(--border)}
+  .btn-secondary:hover{background:#F5F3EE}
+  .btn-danger{background:var(--danger-bg); color:var(--danger)}
+  .btn-danger:hover{background:#FBDCDC}
+  .btn-sm{padding:6px 12px; font-size:13px}
+
+  /* ===== Signature element: AI Suggest button ===== */
+  .btn-ai{
+    display:inline-flex; align-items:center; gap:6px; padding:8px 14px; border-radius:10px;
+    background:linear-gradient(135deg,#6D28D9,#9333EA); color:#fff; border:none;
+    font-family:inherit; font-size:13px; font-weight:700; cursor:pointer;
+    box-shadow:0 2px 10px rgba(109,40,217,.25); transition:.15s;
+  }
+  .btn-ai:hover{box-shadow:0 4px 16px rgba(109,40,217,.4); transform:translateY(-1px)}
+  .btn-ai:disabled{opacity:.6; cursor:wait; transform:none}
+  .ai-box{
+    margin-top:10px; padding:14px 16px; background:var(--primary-light); border-radius:12px;
+    border:1px dashed var(--primary); font-size:13px; display:none;
+  }
+  .ai-box.show{display:block}
+  .ai-box .ai-title{font-weight:700; color:var(--primary-dark); margin-bottom:8px; display:flex; align-items:center; gap:6px}
+  .ai-suggestion-item{margin-bottom:8px; line-height:1.6}
+  .ai-suggestion-item .label{font-weight:700; color:var(--text-soft); font-size:11px}
+  .ai-apply-btn{font-size:11px; color:var(--primary); cursor:pointer; text-decoration:underline; margin-right:8px}
+
+  /* ===== Table ===== */
+  table{width:100%; border-collapse:collapse}
+  th{text-align:right; font-size:12px; color:var(--text-soft); padding:10px 8px; border-bottom:2px solid var(--border)}
+  td{padding:12px 8px; border-bottom:1px solid var(--border); font-size:14px}
+  .badge{display:inline-block; padding:3px 10px; border-radius:20px; font-size:12px; font-weight:700}
+  .badge-green{background:var(--success-bg); color:var(--success)}
+  .badge-red{background:var(--danger-bg); color:var(--danger)}
+  .badge-warn{background:var(--warn-bg); color:var(--warn)}
+  .badge-purple{background:var(--primary-light); color:var(--primary-dark)}
+
+  /* ===== Flash messages ===== */
+  .flash{padding:12px 16px; border-radius:10px; margin-bottom:16px; font-size:14px; font-weight:500}
+  .flash-success{background:var(--success-bg); color:var(--success)}
+  .flash-error{background:var(--danger-bg); color:var(--danger)}
+
+  /* ===== Stats ===== */
+  .stats-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px; margin-bottom:24px}
+  .stat-card{background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:18px; text-align:center}
+  .stat-num{font-size:30px; font-weight:900; color:var(--primary-dark)}
+  .stat-label{font-size:12px; color:var(--text-soft); margin-top:4px}
+
+  .empty-state{text-align:center; padding:50px 20px; color:var(--text-soft)}
+  .form-actions{margin-top:20px; display:flex; gap:10px}
+  .helper-text{font-size:12px; color:var(--text-soft); margin-top:4px}
+</style>
+</head>
+<body>
+
+{% if current_user.is_authenticated %}
+<nav class="sidebar">
+  <div class="brand">{{ tenant.business_name if tenant else 'الداشبورد' }}</div>
+  <div class="brand-sub">منصة {{ tenant.bot_config.bot_name if tenant and tenant.bot_config else 'AI' }}</div>
+
+  <div class="nav-section">عام</div>
+  <a class="nav-link {{ 'active' if request.endpoint=='dashboard.home' }}" href="{{ url_for('dashboard.home') }}">
+    <span class="nav-icon">🏠</span> الرئيسية
+  </a>
+  <a class="nav-link" href="{{ url_for('analytics.tenant_analytics', tenant_slug=tenant.slug, key=request.args.get('key','')) if tenant else '#' }}">
+    <span class="nav-icon">📊</span> التحليلات
+  </a>
+  <a class="nav-link {{ 'active' if request.endpoint=='dashboard.orders_list' }}" href="{{ url_for('dashboard.orders_list') }}">
+    <span class="nav-icon">🧾</span> الطلبات
+  </a>
+
+  <div class="nav-section">المنتجات</div>
+  <a class="nav-link {{ 'active' if request.endpoint and 'product' in request.endpoint }}" href="{{ url_for('dashboard.products_list') }}">
+    <span class="nav-icon">📦</span> المنتجات
+  </a>
+
+  <div class="nav-section">إعدادات البوت</div>
+  <a class="nav-link {{ 'active' if request.endpoint=='dashboard.settings_general' }}" href="{{ url_for('dashboard.settings_general') }}">
+    <span class="nav-icon">🏢</span> بيانات البزنس
+  </a>
+  <a class="nav-link {{ 'active' if request.endpoint=='dashboard.settings_bot' }}" href="{{ url_for('dashboard.settings_bot') }}">
+    <span class="nav-icon">🤖</span> شخصية البوت
+  </a>
+  <a class="nav-link {{ 'active' if request.endpoint=='dashboard.settings_policy' }}" href="{{ url_for('dashboard.settings_policy') }}">
+    <span class="nav-icon">📋</span> السياسات
+  </a>
+  <a class="nav-link {{ 'active' if request.endpoint=='dashboard.keywords_list' }}" href="{{ url_for('dashboard.keywords_list') }}">
+    <span class="nav-icon">🔑</span> الكلمات المفتاحية
+  </a>
+  <a class="nav-link {{ 'active' if request.endpoint=='dashboard.followups_list' }}" href="{{ url_for('dashboard.followups_list') }}">
+    <span class="nav-icon">📬</span> رسائل المتابعة
+  </a>
+  <a class="nav-link {{ 'active' if request.endpoint=='dashboard.pages_list' }}" href="{{ url_for('dashboard.pages_list') }}">
+    <span class="nav-icon">🔗</span> الصفحات المربوطة
+  </a>
+
+  <a class="logout-link" href="{{ url_for('auth.logout') }}">↩ تسجيل الخروج</a>
+</nav>
+{% endif %}
+
+<main class="main">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="flash flash-{{ 'success' if category=='success' else 'error' }}">{{ message }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  {% block content %}{% endblock %}
+</main>
+
+</body>
+</html>

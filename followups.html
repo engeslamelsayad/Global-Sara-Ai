@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}رسائل المتابعة{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">رسائل المتابعة (Follow-up)</h1>
+  <p class="page-sub">مراحل تلقائية بتتبعت للعميل لو ماردش — تقدر تضيف أي عدد من المراحل</p>
+</div>
+
+<div class="card">
+  {% if stages %}
+    {% for s in stages %}
+    <div style="border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:12px; {{ 'opacity:0.5' if not s.is_active }}">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px">
+        <strong>مرحلة #{{ s.stage_number }} — بعد {{ s.hours_after_last }} ساعة</strong>
+        <div style="display:flex; gap:6px">
+          {% if s.discount_percent > 0 %}<span class="badge badge-green">خصم {{ s.discount_percent }}%</span>{% endif %}
+          <form method="POST" action="{{ url_for('dashboard.followup_toggle', stage_id=s.id) }}" style="display:inline">
+            <button class="btn btn-secondary btn-sm" type="submit">{{ 'إيقاف' if s.is_active else 'تفعيل' }}</button>
+          </form>
+          <form method="POST" action="{{ url_for('dashboard.followup_delete', stage_id=s.id) }}" style="display:inline"
+                onsubmit="return confirm('حذف هذه المرحلة؟')">
+            <button class="btn btn-danger btn-sm" type="submit">حذف</button>
+          </form>
+        </div>
+      </div>
+      <p style="font-size:13px; color:var(--text-soft); white-space:pre-line">{{ s.message_text }}</p>
+    </div>
+    {% endfor %}
+  {% else %}
+    <div class="empty-state"><p>لسه مفيش مراحل متابعة. أضف أول مرحلة تحت 👇</p></div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3>+ إضافة مرحلة جديدة</h3>
+  <form method="POST" action="{{ url_for('dashboard.followup_add') }}">
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px">
+      <div>
+        <label>عدد الساعات بعد آخر رسالة (أو بعد المرحلة السابقة)</label>
+        <input type="number" name="hours_after_last" value="24" required>
+      </div>
+      <div>
+        <label>نسبة الخصم % (0 لو بدون خصم)</label>
+        <input type="number" name="discount_percent" value="0">
+      </div>
+    </div>
+    <label>نص الرسالة</label>
+    <textarea name="message_text" required placeholder="أهلاً! لسه مهتم؟ عندنا..."></textarea>
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">إضافة المرحلة</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

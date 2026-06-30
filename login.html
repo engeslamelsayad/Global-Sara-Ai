@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>تسجيل الدخول</title>
+<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#FAFAF7; --surface:#FFFFFF; --border:#E7E2D8; --primary:#6D28D9; --primary-dark:#5B21B6; --text:#1F2A1F; --text-soft:#6B6558; --danger-bg:#FDEDED; --danger:#DC2626}
+  *{box-sizing:border-box}
+  body{margin:0; font-family:'Tajawal',sans-serif; background:var(--bg); min-height:100vh; display:flex; align-items:center; justify-content:center}
+  .box{background:var(--surface); border:1px solid var(--border); border-radius:18px; padding:40px; width:380px; box-shadow:0 10px 40px rgba(109,40,217,.08)}
+  .logo{font-size:24px; font-weight:900; color:var(--primary-dark); text-align:center; margin-bottom:6px}
+  .sub{font-size:13px; color:var(--text-soft); text-align:center; margin-bottom:28px}
+  label{display:block; font-size:13px; font-weight:700; margin:14px 0 6px}
+  input{width:100%; padding:11px 14px; border:1px solid var(--border); border-radius:10px; font-family:inherit; font-size:14px}
+  input:focus{outline:2px solid var(--primary); outline-offset:1px}
+  button{width:100%; margin-top:22px; padding:12px; border:none; border-radius:10px; background:var(--primary); color:#fff; font-family:inherit; font-size:15px; font-weight:700; cursor:pointer}
+  button:hover{background:var(--primary-dark)}
+  .flash{padding:10px 14px; border-radius:10px; background:var(--danger-bg); color:var(--danger); font-size:13px; margin-bottom:6px}
+</style>
+</head>
+<body>
+  <div class="box">
+    <div class="logo">منصة سارة AI</div>
+    <div class="sub">سجّل دخولك لإدارة بوت المبيعات بتاعك</div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="flash">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    <form method="POST">
+      <label>البريد الإلكتروني</label>
+      <input type="email" name="email" required autofocus>
+      <label>كلمة المرور</label>
+      <input type="password" name="password" required>
+      <button type="submit">دخول</button>
+    </form>
+  </div>
+</body>
+</html>

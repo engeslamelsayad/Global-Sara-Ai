@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}بيانات البزنس{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">بيانات البزنس</h1>
+  <p class="page-sub">الوصف ده أساس كل اقتراحات الـ AI في باقي الداشبورد — كل ما يكون أدق كل ما البوت يبقى أذكى</p>
+</div>
+
+<form method="POST" class="card">
+  <label>اسم البزنس *</label>
+  <input type="text" name="business_name" required value="{{ tenant.business_name }}">
+
+  <label>المجال <span class="hint">مثال: منتجات طبية طبيعية، أزياء، إلكترونيات</span></label>
+  <input type="text" name="industry" value="{{ tenant.industry or '' }}">
+
+  <label>وصف البزنس * <span class="hint">اكتب بالتفصيل: بتبيعوا إيه، لمين، وإيه اللي يميزكم</span></label>
+  <textarea name="business_description" id="f-desc" style="min-height:120px">{{ tenant.business_description or '' }}</textarea>
+  <button type="button" class="btn-ai" style="margin-top:8px" onclick="reviewDescription()">✨ راجعلي الوصف</button>
+  <div id="ai-result" class="ai-box"></div>
+
+  <label>رابط Google Sheet للطلبات <span class="hint">رابط Apps Script Web App — اختياري</span></label>
+  <input type="url" name="google_sheet_url" placeholder="https://script.google.com/macros/s/..."
+         value="{{ tenant.google_sheet_url or '' }}">
+  <p class="helper-text">كل طلب يتسجل من البوت هيتبعت تلقائياً لنفس الشيت ده، بالإضافة لتسجيله في النظام.</p>
+
+  <div class="form-actions">
+    <button class="btn btn-primary" type="submit">حفظ التعديلات</button>
+  </div>
+</form>
+
+<script>
+async function reviewDescription(){
+  const desc = document.getElementById('f-desc').value.trim();
+  const btn = event.target;
+  const box = document.getElementById('ai-result');
+  if(!desc){ alert('اكتب وصف أولاً'); return; }
+
+  btn.disabled = true; btn.textContent = '⏳ جاري المراجعة...';
+  try{
+    const res = await fetch("{{ url_for('dashboard.ai_review_description') }}", {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({description: desc})
+    });
+    const data = await res.json();
+    if(data.error){ alert(data.error); return; }
+
+    let html = `<div class="ai-title">✨ مراجعة الـ AI</div>`;
+    if(data.is_sufficient){
+      html += `<div class="ai-suggestion-item">✅ الوصف كافي ومفصّل، تقدر تكمل عادي.</div>`;
+    } else {
+      html += `<div class="ai-suggestion-item"><div class="label">نقاط ناقصة</div>${(data.missing_points||[]).join('، ')}</div>`;
+      html += `<div class="ai-suggestion-item"><div class="label">أسئلة تساعدك توضّح أكتر</div>${(data.clarifying_questions||[]).join('<br>')}</div>`;
+    }
+    if(data.improved_example){
+      html += `<div class="ai-suggestion-item"><div class="label">نسخة محسّنة مقترحة</div>${data.improved_example}
+        <span class="ai-apply-btn" onclick="applyField('f-desc', \`${data.improved_example}\`)">تطبيق ←</span></div>`;
+    }
+    box.innerHTML = html;
+    box.classList.add('show');
+  }catch(e){
+    alert('حصل خطأ، حاول تاني');
+  }finally{
+    btn.disabled = false; btn.textContent = '✨ راجعلي الوصف';
+  }
+}
+function applyField(id, value){ document.getElementById(id).value = value; }
+</script>
+{% endblock %}

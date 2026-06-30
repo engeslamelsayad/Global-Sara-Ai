@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}الكلمات المفتاحية{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">الكلمات المفتاحية</h1>
+  <p class="page-sub">كلمات بتخلي البوت يتصرف بشكل خاص — يطلب موظف بشري أو يعتبرها شكوى</p>
+</div>
+
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:20px">
+
+  <div class="card">
+    <h3>🙋 طلب موظف بشري</h3>
+    <button type="button" class="btn-ai" onclick="suggest('human')">✨ اقترح كلمات إضافية</button>
+    <div id="ai-result-human" class="ai-box"></div>
+
+    <form method="POST" action="{{ url_for('dashboard.keyword_add') }}" style="margin-top:14px; display:flex; gap:8px">
+      <input type="hidden" name="category" value="human">
+      <input type="text" name="value" placeholder="كلمة جديدة..." required style="flex:1">
+      <button class="btn btn-primary btn-sm" type="submit">إضافة</button>
+    </form>
+
+    <div style="margin-top:14px; display:flex; flex-wrap:wrap; gap:6px">
+      {% for kw in human_kw %}
+      <form method="POST" action="{{ url_for('dashboard.keyword_delete', keyword_id=kw.id) }}" style="display:inline">
+        <button class="badge badge-purple" style="border:none; cursor:pointer" type="submit" title="حذف">
+          {{ kw.value }} ✕
+        </button>
+      </form>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>🚨 شكاوى</h3>
+    <button type="button" class="btn-ai" onclick="suggest('complaint')">✨ اقترح كلمات إضافية</button>
+    <div id="ai-result-complaint" class="ai-box"></div>
+
+    <form method="POST" action="{{ url_for('dashboard.keyword_add') }}" style="margin-top:14px; display:flex; gap:8px">
+      <input type="hidden" name="category" value="complaint">
+      <input type="text" name="value" placeholder="كلمة جديدة..." required style="flex:1">
+      <button class="btn btn-primary btn-sm" type="submit">إضافة</button>
+    </form>
+
+    <div style="margin-top:14px; display:flex; flex-wrap:wrap; gap:6px">
+      {% for kw in complaint_kw %}
+      <form method="POST" action="{{ url_for('dashboard.keyword_delete', keyword_id=kw.id) }}" style="display:inline">
+        <button class="badge badge-red" style="border:none; cursor:pointer" type="submit" title="حذف">
+          {{ kw.value }} ✕
+        </button>
+      </form>
+      {% endfor %}
+    </div>
+  </div>
+
+</div>
+
+<script>
+async function suggest(category){
+  const btn = event.target;
+  const box = document.getElementById('ai-result-' + category);
+  btn.disabled = true; btn.textContent = '⏳ جاري التفكير...';
+  try{
+    const res = await fetch("{{ url_for('dashboard.keywords_ai_suggest') }}", {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({category})
+    });
+    const data = await res.json();
+    if(data.error){ alert(data.error); return; }
+    const items = (data.suggested_keywords||[]).map(k =>
+      `<form method="POST" action="/dashboard/keywords/add" style="display:inline">
+        <input type="hidden" name="category" value="${category}">
+        <input type="hidden" name="value" value="${k}">
+        <button class="badge badge-purple" style="border:none;cursor:pointer;margin:3px" type="submit">+ ${k}</button>
+      </form>`).join('');
+    box.innerHTML = `<div class="ai-title">✨ اقتراحات — اضغط لإضافة أي كلمة</div>${items}`;
+    box.classList.add('show');
+  }catch(e){ alert('حصل خطأ، حاول تاني'); }
+  finally{ btn.disabled=false; btn.textContent='✨ اقترح كلمات إضافية'; }
+}
+</script>
+{% endblock %}

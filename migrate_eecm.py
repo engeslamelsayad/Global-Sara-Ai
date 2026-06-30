@@ -1,29 +1,26 @@
 """
-migrate_eecm.py — ترحيل بيانات EECM المكتوبة في الكود إلى الداتابيز كأول tenant
+migrate_eecm.py — ترحيل بيانات EECM من الكود القديم إلى الـ schema الجديدة (v2)
 
-التشغيل (مرة واحدة فقط):
+التشغيل:
+    export EECM_OWNER_EMAIL="بريدك"
+    export EECM_OWNER_PASSWORD="باسورد قوي"
     python migrate_eecm.py
-
-بعد التشغيل: EECM هتبقى موجودة كـ tenant كامل في الداتابيز،
-وهتقدر تدير بياناتها من الداشبورد بدل تعديل الكود.
 """
 
 import os
-import sys
 import json
 from flask import Flask
 from db_init import init_db
-from models import db, Tenant, User, Page, Product, Policy
+from models import (
+    db, Tenant, User, Page, Product, Policy,
+    BotConfig, Keyword, BotAppId, FollowupStage
+)
 
 app = Flask(__name__)
 init_db(app)
 
 
-# =====================================================================
-# البيانات المنقولة من app.py (PRODUCT_LINKS + PRODUCT_PRICES + النصوص)
-# =====================================================================
 EECM_PRODUCTS = [
-    # key, name, description, keywords, price_type, price_amount, shipping, price_note, link
     dict(key="eczema", name="كريم الإكزيما",
          description="كريم طبيعي لعلاج الإكزيما والحكة والاحمرار في الجلد",
          keywords="اكزيما,حكة,التهاب جلدي,طفح جلدي",
@@ -147,74 +144,107 @@ EECM_PRODUCTS = [
          link="https://www.eecm.shop/products/Fresh-mouth-spray1"),
 ]
 
+# كلمات مفتاحية منقولة من app.py القديم
+HUMAN_KEYWORDS = ["مدير", "موظف", "بشري", "إنسان حقيقي", "انسان حقيقي", "مسؤول", "human", "manager"]
+COMPLAINT_KEYWORDS = [
+    "غش", "غشاشين", "احتيال", "نصب", "نصاب", "نصابة", "نصابين", "بنصبوا", "تصابه",
+    "كلب", "وسخ", "وسخه", "وسخة", "زبالة",
+    "لا نافع", "مش نافع", "ما نفعش", "مش بيشتغل", "ما اشتغلش",
+    "هعلن", "هبلغ", "هنشر", "على فيسيبوك", "على السوشيال",
+    "قاضي", "القضاء", "محامي", "خسرت فلوس", "ضيعت فلوس",
+    "مجاش", "مرجعش", "مش راضي خالص",
+]
+
 
 def run_migration():
     with app.app_context():
-        # ── تحقق إن EECM مش متهجرة قبل كده ──
         existing = Tenant.query.filter_by(slug="eecm").first()
         if existing:
             print(f"⚠️  EECM tenant موجودة بالفعل (id={existing.id}) — لن يتم التكرار")
             return existing
 
-        # ── إنشاء الـ Tenant ──
+        # ── Tenant ──
         tenant = Tenant(
             slug="eecm",
             business_name="EECM (Egyptian E-Commerce Medical)",
-            bot_name="سارة",
-            bot_age=28,
-            bot_persona="موظفة مبيعات ودودة ومحترفة، شخصيتها دافئة وخفيفة الدم وعملية",
-            dialect="مصري",
-            whatsapp_number="01559516517",
+            business_description=(
+                "شركة EECM متخصصة في بيع منتجات طبية طبيعية لحل مشاكل صحية شائعة "
+                "(جلدية، عظام، أسنان، تنفسية) بدون الحاجة لزيارة طبيب في الحالات البسيطة. "
+                "تستهدف العملاء في مصر عبر فيسبوك وانستجرام."
+            ),
+            industry="منتجات طبية طبيعية",
             plan="pro",
         )
         db.session.add(tenant)
-        db.session.flush()   # عشان ناخد tenant.id قبل الـ commit
+        db.session.flush()
         print(f"✅ Tenant created: {tenant.business_name} (id={tenant.id})")
 
-        # ── حساب تسجيل دخول للمالك ──
+        # ── Owner account ──
         owner_email = os.environ.get("EECM_OWNER_EMAIL", "owner@eecm.shop")
         owner_password = os.environ.get("EECM_OWNER_PASSWORD", "ChangeMe123!")
-        user = User(
-            tenant_id=tenant.id,
-            email=owner_email,
-            full_name="Eslam Elsayad",
-            role="owner",
-        )
+        user = User(tenant_id=tenant.id, email=owner_email,
+                    full_name="Eslam Elsayad", role="owner")
         user.set_password(owner_password)
         db.session.add(user)
-        print(f"✅ Owner account created: {owner_email}")
-        print(f"   ⚠️  غيّر الباسورد فوراً بعد أول دخول — الافتراضي: {owner_password}")
+        print(f"✅ Owner account: {owner_email} (غيّر الباسورد فوراً)")
 
-        # ── الصفحات (لازم تحط التوكنات الحقيقية بعد كده من الداشبورد) ──
-        pages_data = [
+        # ── Pages ──
+        for platform, page_id, label in [
             ("page", "786079437911484", "YulaRay"),
             ("page", "767308839793152", "Junara"),
-        ]
-        for platform, page_id, label in pages_data:
-            page = Page(tenant_id=tenant.id, platform=platform,
-                        page_id=page_id, label=label,
-                        access_token=os.environ.get(f"{label.upper()}_PAGE_ACCESS_TOKEN", ""))
-            db.session.add(page)
-        print(f"✅ {len(pages_data)} pages linked")
+        ]:
+            db.session.add(Page(
+                tenant_id=tenant.id, platform=platform, page_id=page_id, label=label,
+                access_token=os.environ.get(f"{label.upper()}_PAGE_ACCESS_TOKEN", ""),
+            ))
+        print("✅ 2 pages linked")
 
-        # ── السياسات ──
+        # ── BotConfig (شخصية سارة) ──
+        bot_config = BotConfig(
+            tenant_id=tenant.id,
+            bot_name="سارة", bot_age=28,
+            bot_persona="موظفة مبيعات ودودة ومحترفة، شخصيتها دافئة وخفيفة الدم وعملية",
+            dialect="مصري", tone="ودود وعملي",
+            max_reply_lines=5, use_emojis=True,
+            forbidden_words=json.dumps(["كيفك", "فيك", "شو", "هلق", "مشان"], ensure_ascii=False),
+            forbidden_openers=json.dumps(
+                ["بصراحة أنا موظفة مبيعات", "للأسف مش عندنا", "آسفة بس", "أنا مش متأكدة"],
+                ensure_ascii=False),
+            objection_expensive_response=(
+                "قارني بالبديل الواقعي (دكتور/عيادة) واختمي بأن الدفع عند الاستلام = بدون مخاطرة"
+            ),
+            objection_unsure_response=(
+                "اطمنيه بالضمان (استبدال/استرجاع) وبالمعاينة قبل الدفع"
+            ),
+            objection_later_response="أكدي محدودية الكمية وسهولة الطلب الآن بدون التزام مسبق",
+            contact_number="01559516517",
+            contact_channel="whatsapp",
+            debounce_seconds=45,
+            enable_vision=True,
+        )
+        db.session.add(bot_config)
+        print("✅ BotConfig created (debounce=45s)")
+
+        # ── Policy ──
         policy = Policy(
             tenant_id=tenant.id,
             payment_method="الدفع عند الاستلام (COD)",
             delivery_days="1 إلى 3 أيام عمل",
             return_policy="الاستبدال والاسترجاع متاح ومضمون",
             exchange_policy="استبدال خلال 14 يوم من الاستلام",
-            inspection_policy="العميل يفتح الكرتونة ويعاين المنتج بصرياً قبل الدفع، "
-                               "المندوب بيدي وقت للمعاينة البصرية بس، مش بيستنى تجربة فعلية للمنتج",
+            inspection_policy=(
+                "العميل يفتح الكرتونة ويعاين المنتج بصرياً قبل الدفع، "
+                "المندوب بيدي وقت للمعاينة البصرية بس، مش بيستنى تجربة فعلية للمنتج"
+            ),
             enable_sensitive_area_warning=True,
             enable_chronic_disease_warning=True,
             enable_followup=True,
-            followup_discount_percent=10,
+            enable_installments=False,
         )
         db.session.add(policy)
         print("✅ Policy created")
 
-        # ── المنتجات ──
+        # ── Products ──
         for p in EECM_PRODUCTS:
             product = Product(
                 tenant_id=tenant.id,
@@ -232,6 +262,45 @@ def run_migration():
             )
             db.session.add(product)
         print(f"✅ {len(EECM_PRODUCTS)} products migrated")
+
+        # ── Keywords ──
+        for kw in HUMAN_KEYWORDS:
+            db.session.add(Keyword(tenant_id=tenant.id, category="human", value=kw))
+        for kw in COMPLAINT_KEYWORDS:
+            db.session.add(Keyword(tenant_id=tenant.id, category="complaint", value=kw))
+        print(f"✅ {len(HUMAN_KEYWORDS)} human + {len(COMPLAINT_KEYWORDS)} complaint keywords")
+
+        # ── Bot App IDs (من اللوج اللي حللناه قبل كده) ──
+        for app_id, label in [
+            ("2579055582548571", "بوتنا الرئيسي — Claude/سارة"),
+            ("1114622656624927", "Facebook Instant Reply"),
+        ]:
+            db.session.add(BotAppId(tenant_id=tenant.id, app_id=app_id, label=label))
+        print("✅ 2 bot app IDs registered")
+
+        # ── Followup Stages ──
+        db.session.add(FollowupStage(
+            tenant_id=tenant.id, stage_number=1, hours_after_last=24,
+            message_text=(
+                "أهلاً! 😊 سارة من EECM هنا.\n"
+                "شايفة إنك اتكلمنا من شوية وأنا مش عايزاك تفوّت الفرصة دي.\n"
+                "المنتج لسه متاح، التوصيل 1-3 أيام، والدفع عند الاستلام يعني مفيش أي مخاطرة.\n"
+                "إيه اللي خلاك/ي تتردد/ي؟ أنا هنا أجاوب أي سؤال 💙"
+            ),
+            discount_percent=0,
+        ))
+        db.session.add(FollowupStage(
+            tenant_id=tenant.id, stage_number=2, hours_after_last=12,   # +12h = 36h إجمالي
+            message_text=(
+                "أهلاً مجدداً! 🎁 سارة معاكي من EECM.\n"
+                "عشان مهتم/ة بجد بمنتجاتنا، عندي مفاجأة ليك:\n"
+                "لو طلبت دلوقتي هتاخد خصم 10% على طلبك ✅\n"
+                "بس الخصم ده مش هيفضل طويل!\n"
+                "الدفع عند الاستلام كالعادة. هتطلب دلوقتي؟ 😊"
+            ),
+            discount_percent=10,
+        ))
+        print("✅ 2 followup stages created (24h, +12h=36h total)")
 
         db.session.commit()
         print()

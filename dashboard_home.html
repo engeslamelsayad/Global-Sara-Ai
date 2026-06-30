@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}الرئيسية{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">أهلاً، {{ tenant.business_name }} 👋</h1>
+  <p class="page-sub">نظرة سريعة على حساب {{ tenant.bot_config.bot_name if tenant.bot_config else 'البوت' }}</p>
+</div>
+
+<div class="stats-grid">
+  <div class="stat-card"><div class="stat-num">{{ products_count }}</div><div class="stat-label">منتج نشط</div></div>
+  <div class="stat-card"><div class="stat-num">{{ orders_count }}</div><div class="stat-label">إجمالي الطلبات</div></div>
+  <div class="stat-card"><div class="stat-num">{{ pages_count }}</div><div class="stat-label">صفحة مربوطة</div></div>
+</div>
+
+<div class="card">
+  <h3>🚀 خطوات سريعة</h3>
+  <p class="page-sub" style="margin-bottom:16px">
+    {% if products_count == 0 %}
+      ابدأ بإضافة أول منتج، ثم اربط صفحة فيسبوك أو انستجرام عشان البوت يبدأ يرد على عملائك.
+    {% else %}
+      كل حاجة شغالة! تقدر تراجع التحليلات أو تضيف منتجات جديدة في أي وقت.
+    {% endif %}
+  </p>
+  <div style="display:flex; gap:10px; flex-wrap:wrap">
+    <a class="btn btn-primary" href="{{ url_for('dashboard.products_list') }}">📦 إدارة المنتجات</a>
+    <a class="btn btn-secondary" href="{{ url_for('dashboard.pages_list') }}">🔗 ربط صفحة</a>
+    <a class="btn btn-secondary" href="{{ url_for('dashboard.settings_bot') }}">🤖 شخصية البوت</a>
+  </div>
+</div>
+{% endblock %}

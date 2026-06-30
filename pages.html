@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}الصفحات المربوطة{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">الصفحات المربوطة</h1>
+  <p class="page-sub">صفحات فيسبوك وانستجرام اللي البوت بيرد عليها</p>
+</div>
+
+<div class="card" style="padding:0; overflow:hidden">
+  {% if pages %}
+  <table>
+    <thead><tr><th>الاسم</th><th>المنصة</th><th>Page ID</th><th></th></tr></thead>
+    <tbody>
+      {% for p in pages %}
+      <tr>
+        <td>{{ p.label or '—' }}</td>
+        <td><span class="badge badge-purple">{{ 'فيسبوك' if p.platform=='page' else 'انستجرام' }}</span></td>
+        <td style="font-family:monospace; font-size:13px">{{ p.page_id }}</td>
+        <td style="text-align:left">
+          <form method="POST" action="{{ url_for('dashboard.page_delete', page_id=p.id) }}"
+                onsubmit="return confirm('حذف هذه الصفحة؟')">
+            <button class="btn btn-danger btn-sm" type="submit">حذف</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state"><p>لسه مفيش صفحات مربوطة</p></div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3>+ ربط صفحة جديدة</h3>
+  <form method="POST" action="{{ url_for('dashboard.page_add') }}">
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px">
+      <div>
+        <label>اسم وصفي</label>
+        <input type="text" name="label" placeholder="مثال: صفحتي الرئيسية">
+      </div>
+      <div>
+        <label>المنصة</label>
+        <select name="platform">
+          <option value="page">فيسبوك</option>
+          <option value="instagram">انستجرام</option>
+        </select>
+      </div>
+    </div>
+    <label>Page ID <span class="hint">تلاقيه في Meta Business Suite</span></label>
+    <input type="text" name="page_id" required>
+    <label>Access Token</label>
+    <input type="text" name="access_token" required>
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">ربط الصفحة</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

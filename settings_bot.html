@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block title %}شخصية البوت{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">شخصية البوت</h1>
+  <p class="page-sub">كل التفاصيل اللي بتحدد إزاي البوت بيتكلم ويرد على عملائك</p>
+</div>
+
+<form method="POST" class="card">
+  <h3>الهوية</h3>
+  <button type="button" class="btn-ai" onclick="suggestPersona()">✨ اقترح شخصية مناسبة لبزنسي</button>
+  <div id="ai-persona-result" class="ai-box"></div>
+
+  <div style="display:grid; grid-template-columns:2fr 1fr; gap:14px">
+    <div>
+      <label>اسم البوت</label>
+      <input type="text" name="bot_name" id="f-bot-name" value="{{ bc.bot_name }}">
+    </div>
+    <div>
+      <label>العمر</label>
+      <input type="number" name="bot_age" id="f-bot-age" value="{{ bc.bot_age }}">
+    </div>
+  </div>
+
+  <label>وصف الشخصية</label>
+  <textarea name="bot_persona" id="f-bot-persona">{{ bc.bot_persona }}</textarea>
+
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px">
+    <div>
+      <label>اللهجة</label>
+      <select name="dialect" id="f-dialect">
+        <option value="مصري" {{ 'selected' if bc.dialect=='مصري' }}>مصري</option>
+        <option value="خليجي" {{ 'selected' if bc.dialect=='خليجي' }}>خليجي</option>
+        <option value="شامي" {{ 'selected' if bc.dialect=='شامي' }}>شامي</option>
+        <option value="فصحى" {{ 'selected' if bc.dialect=='فصحى' }}>فصحى</option>
+      </select>
+    </div>
+    <div>
+      <label>نبرة الصوت</label>
+      <input type="text" name="tone" id="f-tone" value="{{ bc.tone }}" placeholder="ودود وعملي">
+    </div>
+  </div>
+
+  <h3 style="margin-top:24px">أسلوب الرد</h3>
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px">
+    <div>
+      <label>حد أقصى لأسطر الرد</label>
+      <input type="number" name="max_reply_lines" value="{{ bc.max_reply_lines }}">
+    </div>
+    <div>
+      <label>مدة انتظار تجميع الرسائل (ثانية)
+        <span class="hint">لو العميل بعت رسائل متتالية، البوت يستنى قد إيه قبل ما يرد عليهم كلهم مرة واحدة</span>
+      </label>
+      <input type="number" name="debounce_seconds" value="{{ bc.debounce_seconds }}">
+    </div>
+  </div>
+
+  <div class="checkbox-row">
+    <input type="checkbox" name="use_emojis" id="ue" {{ 'checked' if bc.use_emojis }}>
+    <label for="ue" style="margin:0">استخدام إيموجي في الردود</label>
+  </div>
+  <div class="checkbox-row">
+    <input type="checkbox" name="enable_vision" id="ev" {{ 'checked' if bc.enable_vision }}>
+    <label for="ev" style="margin:0">البوت يقدر يشوف الصور اللي العملاء بيبعتوها</label>
+  </div>
+
+  <label>كلمات ممنوعة <span class="hint">مفصولة بفاصلة — لهجات أو كلمات مش مناسبة لبزنسك</span></label>
+  <input type="text" name="forbidden_words" value="{{ forbidden_words }}" placeholder="كيفك, فيك, شو">
+
+  <label>افتتاحيات ممنوعة <span class="hint">كل جملة في سطر — جمل بداية ضعيفة ممنوع البوت يستخدمها</span></label>
+  <textarea name="forbidden_openers">{{ forbidden_openers }}</textarea>
+
+  <h3 style="margin-top:24px">معالجة الاعتراضات</h3>
+  <button type="button" class="btn-ai" onclick="suggestObjections()">✨ اقترح ردود اعتراضات مناسبة</button>
+  <div id="ai-obj-result" class="ai-box"></div>
+
+  <label>رد على "غالي"</label>
+  <textarea name="objection_expensive_response" id="f-obj-exp">{{ bc.objection_expensive_response or '' }}</textarea>
+  <label>رد على "مش متأكد"</label>
+  <textarea name="objection_unsure_response" id="f-obj-unsure">{{ bc.objection_unsure_response or '' }}</textarea>
+  <label>رد على "هفكر"</label>
+  <textarea name="objection_later_response" id="f-obj-later">{{ bc.objection_later_response or '' }}</textarea>
+
+  <h3 style="margin-top:24px">التواصل</h3>
+  <div style="display:grid; grid-template-columns:2fr 1fr; gap:14px">
+    <div>
+      <label>رقم التواصل</label>
+      <input type="text" name="contact_number" value="{{ bc.contact_number or '' }}">
+    </div>
+    <div>
+      <label>نوع القناة</label>
+      <select name="contact_channel">
+        <option value="whatsapp" {{ 'selected' if bc.contact_channel=='whatsapp' }}>واتساب فقط</option>
+        <option value="call" {{ 'selected' if bc.contact_channel=='call' }}>مكالمات</option>
+        <option value="both" {{ 'selected' if bc.contact_channel=='both' }}>الاتنين</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="form-actions">
+    <button class="btn btn-primary" type="submit">حفظ التعديلات</button>
+  </div>
+</form>
+
+<script>
+async function suggestPersona(){
+  const btn = event.target; const box = document.getElementById('ai-persona-result');
+  btn.disabled = true; btn.textContent = '⏳ جاري التفكير...';
+  try{
+    const res = await fetch("{{ url_for('dashboard.ai_suggest_persona') }}", {method:'POST'});
+    const data = await res.json();
+    if(data.error){ alert(data.error); return; }
+    box.innerHTML = `
+      <div class="ai-title">✨ اقتراحات الشخصية</div>
+      <div class="ai-suggestion-item"><div class="label">الاسم</div>${data.suggested_bot_name}
+        <span class="ai-apply-btn" onclick="applyField('f-bot-name', \`${data.suggested_bot_name}\`)">تطبيق ←</span></div>
+      <div class="ai-suggestion-item"><div class="label">العمر</div>${data.suggested_age}
+        <span class="ai-apply-btn" onclick="applyField('f-bot-age', \`${data.suggested_age}\`)">تطبيق ←</span></div>
+      <div class="ai-suggestion-item"><div class="label">الشخصية</div>${data.suggested_persona}
+        <span class="ai-apply-btn" onclick="applyField('f-bot-persona', \`${data.suggested_persona}\`)">تطبيق ←</span></div>
+      <div class="ai-suggestion-item"><div class="label">النبرة</div>${data.suggested_tone}
+        <span class="ai-apply-btn" onclick="applyField('f-tone', \`${data.suggested_tone}\`)">تطبيق ←</span></div>
+      <div class="ai-suggestion-item"><div class="label">مثال ترحيب</div>${data.example_greeting}</div>`;
+    box.classList.add('show');
+  }catch(e){ alert('حصل خطأ، حاول تاني'); }
+  finally{ btn.disabled=false; btn.textContent='✨ اقترح شخصية مناسبة لبزنسي'; }
+}
+
+async function suggestObjections(){
+  const btn = event.target; const box = document.getElementById('ai-obj-result');
+  btn.disabled = true; btn.textContent = '⏳ جاري التفكير...';
+  try{
+    const res = await fetch("{{ url_for('dashboard.ai_suggest_objections') }}", {method:'POST'});
+    const data = await res.json();
+    if(data.error){ alert(data.error); return; }
+    box.innerHTML = `
+      <div class="ai-title">✨ اقتراحات ردود الاعتراضات</div>
+      <div class="ai-suggestion-item"><div class="label">غالي</div>${data.objection_expensive}
+        <span class="ai-apply-btn" onclick="applyField('f-obj-exp', \`${data.objection_expensive}\`)">تطبيق ←</span></div>
+      <div class="ai-suggestion-item"><div class="label">مش متأكد</div>${data.objection_unsure}
+        <span class="ai-apply-btn" onclick="applyField('f-obj-unsure', \`${data.objection_unsure}\`)">تطبيق ←</span></div>
+      <div class="ai-suggestion-item"><div class="label">هفكر</div>${data.objection_later}
+        <span class="ai-apply-btn" onclick="applyField('f-obj-later', \`${data.objection_later}\`)">تطبيق ←</span></div>`;
+    box.classList.add('show');
+  }catch(e){ alert('حصل خطأ، حاول تاني'); }
+  finally{ btn.disabled=false; btn.textContent='✨ اقترح ردود اعتراضات مناسبة'; }
+}
+function applyField(id, value){ document.getElementById(id).value = value; }
+</script>
+{% endblock %}
