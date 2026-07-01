@@ -185,6 +185,26 @@ def product_ai_suggest():
     return jsonify(result)
 
 
+@dashboard_bp.route("/products/ai-suggest-url", methods=["POST"])
+@login_required_dashboard
+def product_ai_suggest_url():
+    """يستخرج بيانات المنتج من رابط الـ landing page"""
+    tenant = _current_tenant()
+    url = request.json.get("url", "").strip()
+    if not url:
+        return jsonify({"error": "الرابط فارغ"}), 400
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+
+    bc = tenant.bot_config
+    result = ai_assist.suggest_product_from_url(
+        url,
+        business_description=tenant.business_description or "",
+        dialect=bc.dialect if bc else "مصري",
+    )
+    return jsonify(result)
+
+
 # =====================================================================
 # BOT SETTINGS
 # =====================================================================

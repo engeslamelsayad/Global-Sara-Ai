@@ -9,9 +9,37 @@
 {% if not product %}
 <div class="card" style="border:1px solid #DDD0F8; background:linear-gradient(135deg,#FBF9FF,#F4EEFF)">
   <h3 style="display:flex; align-items:center; gap:8px; margin-top:0">✨ مساعد الذكاء الاصطناعي</h3>
-  <p class="page-sub" style="margin-bottom:10px">اكتب وصف بسيط للمنتج، والـ AI هيقترحلك اسم ووصف وكلمات بحث</p>
-  <textarea id="ai-short-input" placeholder="مثال: كريم للحبوب فيه شي بتر وزيت شاي، بيهدي الالتهاب"></textarea>
-  <button type="button" class="btn-ai" style="margin-top:10px" onclick="suggestProduct()">✨ اقترح لي التفاصيل</button>
+  <p class="page-sub" style="margin-bottom:14px">اختر طريقة الإدخال — وصف نصي أو رابط الصفحة</p>
+
+  <!-- Tabs -->
+  <div style="display:flex; gap:0; margin-bottom:14px; border-radius:10px; overflow:hidden; border:1px solid #DDD0F8">
+    <button type="button" id="tab-text" onclick="switchTab('text')"
+      style="flex:1; padding:10px; border:none; font-family:inherit; font-size:14px; font-weight:700; cursor:pointer; background:#6D28D9; color:#fff; transition:.15s">
+      ✍️ وصف نصي
+    </button>
+    <button type="button" id="tab-url" onclick="switchTab('url')"
+      style="flex:1; padding:10px; border:none; font-family:inherit; font-size:14px; font-weight:700; cursor:pointer; background:#F4EEFF; color:#6D28D9; transition:.15s">
+      🔗 رابط الصفحة
+    </button>
+  </div>
+
+  <!-- Text input -->
+  <div id="panel-text">
+    <textarea id="ai-short-input" placeholder="مثال: كريم للحبوب فيه شي بتر وزيت شاي، بيهدي الالتهاب" style="margin-bottom:10px"></textarea>
+    <button type="button" class="btn-ai" onclick="suggestFromText()">✨ اقترح لي التفاصيل</button>
+  </div>
+
+  <!-- URL input -->
+  <div id="panel-url" style="display:none">
+    <input type="url" id="ai-url-input"
+      placeholder="https://www.eecm.shop/products/eczema-treatment-cream"
+      style="margin-bottom:10px">
+    <p class="helper-text" style="margin-bottom:10px">
+      🔗 الـ AI هيفتح الصفحة ويستخرج منها الاسم والوصف والمميزات والأسئلة الشائعة — كل حاجة دفعة واحدة
+    </p>
+    <button type="button" class="btn-ai" onclick="suggestFromUrl()">🔗 استخرج من الرابط</button>
+  </div>
+
   <div id="ai-result" class="ai-box"></div>
 </div>
 {% endif %}
@@ -55,7 +83,7 @@
     </div>
     <div>
       <label>نص السعر الجاهز <span class="hint">المثال: 449 ج شامل الشحن</span></label>
-      <input type="text" name="price_note" value="{{ product.price_note if product else '' }}">
+      <input type="text" name="price_note" id="f-price-note" value="{{ product.price_note if product else '' }}">
     </div>
   </div>
 
@@ -70,18 +98,18 @@
   <textarea name="features" style="min-height:90px" placeholder="طبيعي 100% بدون كورتيزون&#10;يخفف الحكة من أول استخدام&#10;آمن للاستخدام اليومي" id="f-features">{{ product_features_text or '' }}</textarea>
 
   <label>من يستفيد من هذا المنتج؟</label>
-  <textarea name="who_benefits" style="min-height:60px" placeholder="مثال: من يعانون من حكة وتهيج الجلد المزمن بدون سبب واضح">{{ product.who_benefits if product else '' }}</textarea>
+  <textarea name="who_benefits" id="f-who-benefits" style="min-height:60px" placeholder="مثال: من يعانون من حكة وتهيج الجلد المزمن بدون سبب واضح">{{ product.who_benefits if product else '' }}</textarea>
 
   <label>متى تظهر النتيجة؟</label>
-  <input type="text" name="results_timeline"
+  <input type="text" name="results_timeline" id="f-results-timeline"
          value="{{ product.results_timeline if product else '' }}"
          placeholder="مثال: تخفيف الحكة من أول ليلة، نتيجة كاملة خلال 2-4 أسابيع">
 
   <label>نص الإغلاق والإقناع <span class="hint">جملة قوية يقولها البوت لما العميل مش متأكد</span></label>
-  <textarea name="closing_pitch" style="min-height:60px" placeholder="مثال: الدفع عند الاستلام يعني مفيش أي مخاطرة — لو المنتج مش عاجبك ارجعه ومش هتدفع حاجة">{{ product.closing_pitch if product else '' }}</textarea>
+  <textarea name="closing_pitch" id="f-closing-pitch" style="min-height:60px" placeholder="مثال: الدفع عند الاستلام يعني مفيش أي مخاطرة — لو المنتج مش عاجبك ارجعه ومش هتدفع حاجة">{{ product.closing_pitch if product else '' }}</textarea>
 
   <label>أسئلة شائعة (FAQ) <span class="hint">كل سؤال: "س: ..." ثم الجواب: "ج: ..."</span></label>
-  <textarea name="faq" style="min-height:120px" placeholder="س: هيضر لو عندي سكر؟&#10;ج: المنتج طبيعي 100% لكن ننصح تستشير طبيبك&#10;&#10;س: أقدر أرجعه لو مش عاجبني؟&#10;ج: أيوه، الاسترجاع مضمون 14 يوم" id="f-faq">{{ product_faq_text or '' }}</textarea>
+  <textarea name="faq" id="f-faq" style="min-height:120px" placeholder="س: هيضر لو عندي سكر؟&#10;ج: المنتج طبيعي 100% لكن ننصح تستشير طبيبك&#10;&#10;س: أقدر أرجعه لو مش عاجبني؟&#10;ج: أيوه، الاسترجاع مضمون 14 يوم" id="f-faq">{{ product_faq_text or '' }}</textarea>
 
   <label>منتجات مكملة (Cross-Selling) <span class="hint">مفاتيح المنتجات مفصولة بفاصلة — مثال: sleep,eczema</span></label>
   <input type="text" name="cross_selling"
@@ -111,32 +139,83 @@
 </form>
 
 <script>
-async function suggestProduct(){
+function switchTab(tab){
+  document.getElementById('panel-text').style.display = tab==='text' ? '' : 'none';
+  document.getElementById('panel-url').style.display  = tab==='url'  ? '' : 'none';
+  document.getElementById('tab-text').style.background = tab==='text' ? '#6D28D9' : '#F4EEFF';
+  document.getElementById('tab-text').style.color      = tab==='text' ? '#fff'    : '#6D28D9';
+  document.getElementById('tab-url').style.background  = tab==='url'  ? '#6D28D9' : '#F4EEFF';
+  document.getElementById('tab-url').style.color       = tab==='url'  ? '#fff'    : '#6D28D9';
+}
+
+function applyAll(data){
+  /* يملأ كل الحقول دفعة واحدة */
+  if(data.suggested_name)        applyField('f-name', data.suggested_name);
+  if(data.suggested_description) applyField('f-description', data.suggested_description);
+  if(data.suggested_keywords)    applyField('f-keywords', data.suggested_keywords);
+  if(data.features_text)         applyField('f-features', data.features_text);
+  if(data.who_benefits)          applyField('f-who-benefits', data.who_benefits);
+  if(data.results_timeline)      applyField('f-results-timeline', data.results_timeline);
+  if(data.closing_pitch)         applyField('f-closing-pitch', data.closing_pitch);
+  if(data.faq_text)              applyField('f-faq', data.faq_text);
+  if(data.price_note)            applyField('f-price-note', data.price_note);
+}
+
+function renderResult(data){
+  const box = document.getElementById('ai-result');
+  if(data.error){ box.innerHTML=`<div style="color:red">❌ ${data.error}</div>`; box.classList.add('show'); return; }
+
+  box.innerHTML = `
+    <div class="ai-title">✨ اقتراحات الـ AI
+      <button type="button" onclick="applyAll(window._lastAiData)"
+        style="margin-right:auto; padding:4px 12px; border-radius:8px; background:#6D28D9; color:#fff; border:none; font-family:inherit; font-size:12px; font-weight:700; cursor:pointer">
+        ← تطبيق الكل دفعة واحدة
+      </button>
+    </div>
+    ${data.suggested_name ? `<div class="ai-suggestion-item"><div class="label">الاسم</div>${data.suggested_name} <span class="ai-apply-btn" onclick="applyField('f-name',\`${data.suggested_name}\`)">تطبيق ←</span></div>` : ''}
+    ${data.suggested_description ? `<div class="ai-suggestion-item"><div class="label">الوصف</div>${data.suggested_description} <span class="ai-apply-btn" onclick="applyField('f-description',\`${data.suggested_description}\`)">تطبيق ←</span></div>` : ''}
+    ${data.suggested_keywords ? `<div class="ai-suggestion-item"><div class="label">كلمات البحث</div>${data.suggested_keywords} <span class="ai-apply-btn" onclick="applyField('f-keywords',\`${data.suggested_keywords}\`)">تطبيق ←</span></div>` : ''}
+    ${data.features_text ? `<div class="ai-suggestion-item"><div class="label">المميزات</div><pre style="margin:4px 0;font-family:inherit;font-size:12px">${data.features_text}</pre><span class="ai-apply-btn" onclick="applyField('f-features',\`${data.features_text}\`)">تطبيق ←</span></div>` : ''}
+    ${data.who_benefits ? `<div class="ai-suggestion-item"><div class="label">من يستفيد</div>${data.who_benefits} <span class="ai-apply-btn" onclick="applyField('f-who-benefits',\`${data.who_benefits}\`)">تطبيق ←</span></div>` : ''}
+    ${data.results_timeline ? `<div class="ai-suggestion-item"><div class="label">متى النتيجة</div>${data.results_timeline} <span class="ai-apply-btn" onclick="applyField('f-results-timeline',\`${data.results_timeline}\`)">تطبيق ←</span></div>` : ''}
+    ${data.closing_pitch ? `<div class="ai-suggestion-item"><div class="label">نص الإغلاق</div>${data.closing_pitch} <span class="ai-apply-btn" onclick="applyField('f-closing-pitch',\`${data.closing_pitch}\`)">تطبيق ←</span></div>` : ''}
+    ${data.faq_text ? `<div class="ai-suggestion-item"><div class="label">أسئلة شائعة</div><pre style="margin:4px 0;font-family:inherit;font-size:12px;white-space:pre-wrap">${data.faq_text}</pre><span class="ai-apply-btn" onclick="applyField('f-faq',\`${data.faq_text}\`)">تطبيق ←</span></div>` : ''}
+    ${data.price_note ? `<div class="ai-suggestion-item"><div class="label">السعر (من الصفحة)</div>${data.price_note} <span class="ai-apply-btn" onclick="applyField('f-price-note',\`${data.price_note}\`)">تطبيق ←</span></div>` : ''}
+  `;
+  box.classList.add('show');
+  window._lastAiData = data;
+}
+
+async function suggestFromText(){
   const input = document.getElementById('ai-short-input').value.trim();
   const btn = event.target;
-  const box = document.getElementById('ai-result');
   if(!input){ alert('اكتب وصف مبدئي أولاً'); return; }
-
-  btn.disabled = true; btn.textContent = '⏳ جاري التفكير...';
+  btn.disabled=true; btn.textContent='⏳ جاري التفكير...';
   try{
     const res = await fetch("{{ url_for('dashboard.product_ai_suggest') }}", {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({short_input: input})
     });
-    const data = await res.json();
-    if(data.error){ alert(data.error); return; }
-    box.innerHTML = `
-      <div class="ai-title">✨ اقتراحات الـ AI</div>
-      <div class="ai-suggestion-item"><div class="label">الاسم</div>${data.suggested_name}
-        <span class="ai-apply-btn" onclick="applyField('f-name',\`${data.suggested_name}\`)">تطبيق ←</span></div>
-      <div class="ai-suggestion-item"><div class="label">الوصف</div>${data.suggested_description}
-        <span class="ai-apply-btn" onclick="applyField('f-description',\`${data.suggested_description}\`)">تطبيق ←</span></div>
-      <div class="ai-suggestion-item"><div class="label">كلمات البحث</div>${data.suggested_keywords}
-        <span class="ai-apply-btn" onclick="applyField('f-keywords',\`${data.suggested_keywords}\`)">تطبيق ←</span></div>`;
-    box.classList.add('show');
+    renderResult(await res.json());
   }catch(e){ alert('حصل خطأ، حاول تاني'); }
   finally{ btn.disabled=false; btn.textContent='✨ اقترح لي التفاصيل'; }
 }
-function applyField(id, value){ document.getElementById(id).value = value; }
+
+async function suggestFromUrl(){
+  const url = document.getElementById('ai-url-input').value.trim();
+  const btn = event.target;
+  if(!url){ alert('الصق رابط صفحة المنتج أولاً'); return; }
+  btn.disabled=true; btn.textContent='⏳ جاري قراءة الصفحة...';
+  try{
+    const res = await fetch("{{ url_for('dashboard.product_ai_suggest_url') }}", {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({url})
+    });
+    renderResult(await res.json());
+  }catch(e){ alert('حصل خطأ، حاول تاني'); }
+  finally{ btn.disabled=false; btn.textContent='🔗 استخرج من الرابط'; }
+}
+
+function applyField(id, value){ const el=document.getElementById(id); if(el) el.value=value; }
 </script>
 {% endblock %}

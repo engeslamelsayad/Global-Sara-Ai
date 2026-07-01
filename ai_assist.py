@@ -13,12 +13,13 @@ ai_assist.py — اقتراحات مدعومة بالـ AI لمساعدة مال
 
 import os
 import json
+import re
 import anthropic
+import requests as _requests
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-# موديل اقتصادي وسريع يكفي تماماً لمهام الاقتراحات القصيرة دي
 ASSIST_MODEL = "claude-haiku-4-5-20251001"
 
 
@@ -152,3 +153,79 @@ def review_business_description(raw_description):
   "improved_example": "نسخة محسّنة ومقترحة من نفس الوصف، بنفس لغته، أوضح وأشمل"
 }}"""
     return _ask_json(prompt)
+
+
+# =====================================================================
+# 6) استخراج بيانات المنتج من رابط الـ Landing Page
+# =====================================================================
+def _fetch_page_text(url, max_chars=4000):
+    """يجلب نص الصفحة ويجرّدها من الـ HTML"""
+    try:
+        resp = _requests.get(url, timeout=15, headers={
+            "User-Agent": "Mozilla/5.0 (compatible; ProductBot/1.0)"
+        })
+        resp.raise_for_status()
+        # إزالة HTML tags بطريقة بسيطة
+        text = re.sub(r"<style[^>]*>.*?</style>", " ", resp.text, flags=re.DOTALL)
+        text = re.sub(r"<script[^>]*>.*?</script>", " ", text, flags=re.DOTALL)
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text[:max_chars]
+    except Exception as e:
+        return None, str(e)
+
+
+def suggest_product_from_url(url, business_description="", dialect="مصري"):
+    """
+    يجلب محتوى الـ landing page ويستخرج منها كل بيانات المنتج المطلوبة.
+
+    مدخل: رابط صفحة المنتج (eecm.shop أو أي موقع)
+    مخرج: نفس صيغة suggest_product_details + حقول إضافية (features, faq, closing_pitch)
+    """
+    page_text = _fetch_page_text(url)
+    if isinstance(page_text, tuple):
+        # خطأ في الجلب
+        return {"error": f"تعذّر جلب الصفحة: {page_text[1]}"}
+    if not page_text or len(page_text) < 50:
+        return {"error": "الصفحة فارغة أو لم يتم جلبها — تأكد من الرابط"}
+
+    prompt = f"""أنت محلل منتجات محترف. فيما يلي محتوى نصي من صفحة منتج:
+
+---
+{page_text}
+---
+
+بيانات البزنس (إن وُجدت): "{business_description or 'غير محدد'}"
+اللهجة المطلوبة في الإخراج: {dialect}
+
+استخرج بيانات المنتج من هذا النص بدقة. رد بصيغة JSON فقط:
+{{
+  "suggested_name": "اسم تسويقي جذاب للمنتج",
+  "suggested_description": "وصف بيعي مقنع في 2-3 جمل يبرز الفايدة الأساسية",
+  "suggested_keywords": "كلمة1,كلمة2,كلمة3,كلمة4,كلمة5 (كلمات يستخدمها العملاء للسؤال عن المشكلة)",
+  "features": ["ميزة 1", "ميزة 2", "ميزة 3"],
+  "who_benefits": "من يستفيد من هذا المنتج (وصف الجمهور المستهدف)",
+  "results_timeline": "متى تظهر النتيجة بعد الاستخدام",
+  "closing_pitch": "جملة إقناع قوية لإغلاق البيع لما العميل مش متأكد",
+  "faq_pairs": [
+    {{"q": "سؤال شائع 1", "a": "جواب مقنع 1"}},
+    {{"q": "سؤال شائع 2", "a": "جواب مقنع 2"}}
+  ],
+  "price_note": "معلومة السعر لو ذُكرت في الصفحة، وإلا اتركها فارغة"
+}}"""
+
+    result = _ask_json(prompt, max_tokens=1200)
+
+    # حوّل faq_pairs لـ text بسيط للـ textarea
+    if "faq_pairs" in result and isinstance(result["faq_pairs"], list):
+        faq_text = "\n".join(
+            f"س: {item.get('q','')}\nج: {item.get('a','')}"
+            for item in result["faq_pairs"]
+        )
+        result["faq_text"] = faq_text
+
+    # حوّل features list لـ text بسيط
+    if "features" in result and isinstance(result["features"], list):
+        result["features_text"] = "\n".join(result["features"])
+
+    return result
