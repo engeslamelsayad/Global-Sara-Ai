@@ -196,6 +196,31 @@ def find_relevant_product(message, products):
     return best_match
 
 
+def capture_ad_referral(bundle, event, sender_id):
+    """
+    يلتقط إعلان المصدر (Click-to-Messenger) من الـ referral ويخزّن المنتج المطابق
+    في حالة المحادثة — عشان لو العميل سأل 'بكام؟' يعرف البوت المنتج.
+    """
+    # الـ referral ممكن يكون جوه message أو event مستقل
+    referral = (event.get("message", {}) or {}).get("referral") or event.get("referral")
+    if not referral or referral.get("source") != "ADS":
+        return
+    ad_title = referral.get("ads_context_data", {}).get("ad_title", "")
+    if not ad_title:
+        return
+
+    tenant = bundle["tenant"]
+    matched = find_relevant_product(ad_title, bundle["products"])
+    state = load_state(tenant.id, sender_id)
+    state["source_ad_title"] = ad_title
+    if matched:
+        state["source_ad_product_key"] = matched.product_key
+        print(f"📢 عميل من إعلان: '{ad_title[:40]}' → منتج: {matched.name}")
+    else:
+        print(f"📢 عميل من إعلان: '{ad_title[:40]}' (لم يُطابَق منتج)")
+    save_state(tenant.id, sender_id, state)
+
+
 # =====================================================================
 # SYSTEM PROMPT BUILDER — ديناميكي بالكامل من بيانات الـ tenant
 # =====================================================================
@@ -418,6 +443,15 @@ def get_ai_response(bundle, sender_id, user_message, state,
     keywords = bundle["keywords"]
 
     matched_product = find_relevant_product(user_message, products)
+
+    # ── عميل جاي من إعلان: لو الرسالة مفيهاش منتج واضح، استخدم منتج الإعلان ──
+    # ده بيحل مشكلة "بكام؟" لما العميل يسأل من غير ما يسمّي المنتج
+    if not matched_product and state.get("source_ad_product_key"):
+        ad_key = state["source_ad_product_key"]
+        matched_product = next((p for p in products if p.product_key == ad_key), None)
+        if matched_product:
+            print(f"🎯 استخدام منتج الإعلان في السياق: {matched_product.name}")
+
     system_blocks   = build_system_prompt(bundle, matched_product, state)
 
     history = state.get("history", [])
@@ -802,19 +836,34 @@ def _debounce_fire(tenant_id, sender_id):
     if len(batch["messages"]) > 1:
         print(f"📦 Batched {len(batch['messages'])} msgs from {sender_id}")
 
-    do_process_message(
-        tenant_id, sender_id, combined,
-        batch["page_id"], batch["platform"],
-        batch.get("image_b64"), batch.get("image_media_type", "image/jpeg"),
-    )
+    # الـ Timer thread محتاج app context عشان الـ DB queries تشتغل
+    app_obj = batch.get("app_obj")
+    if app_obj:
+        with app_obj.app_context():
+            do_process_message(
+                tenant_id, sender_id, combined,
+                batch["page_id"], batch["platform"],
+                batch.get("image_b64"), batch.get("image_media_type", "image/jpeg"),
+            )
+    else:
+        do_process_message(
+            tenant_id, sender_id, combined,
+            batch["page_id"], batch["platform"],
+            batch.get("image_b64"), batch.get("image_media_type", "image/jpeg"),
+        )
 
 
 def buffer_message(bundle, sender_id, message, page_id, platform,
                    image_b64=None, image_media_type="image/jpeg"):
     """يضيف رسالة لطابور الانتظار ويبدأ/يجدد مؤقت الـ debounce الخاص بالـ tenant"""
+    from flask import current_app
     tenant_id = bundle["tenant"].id
     debounce_seconds = bundle["bot_config"].debounce_seconds or 45
     key = (tenant_id, sender_id)
+    try:
+        app_obj = current_app._get_current_object()
+    except RuntimeError:
+        app_obj = None
 
     with pending_lock:
         if key in pending_messages:
@@ -827,7 +876,9 @@ def buffer_message(bundle, sender_id, message, page_id, platform,
             pending_messages[key] = {
                 "messages": [message], "page_id": page_id, "platform": platform,
                 "image_b64": image_b64, "image_media_type": image_media_type,
+                "app_obj": app_obj,
             }
+        pending_messages[key]["app_obj"] = app_obj
 
         timer = threading.Timer(debounce_seconds, _debounce_fire, args=[tenant_id, sender_id])
         pending_messages[key]["timer"] = timer

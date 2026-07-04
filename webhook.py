@@ -11,7 +11,7 @@ from flask import Blueprint, request, jsonify
 
 from bot_engine import (
     get_tenant_for_page, buffer_message, handle_echo, is_closing_reaction,
-    download_meta_image, send_message,
+    download_meta_image, send_message, capture_ad_referral,
 )
 
 webhook_bp = Blueprint("webhook", __name__)
@@ -47,6 +47,11 @@ def receive_message():
                 continue
 
             for event in entry.get("messaging", []):
+                # ── referral منفصل (العميل ضغط الإعلان قبل ما يكتب) ──
+                if "message" not in event and "referral" in event:
+                    capture_ad_referral(bundle, event, event["sender"]["id"])
+                    continue
+
                 if "message" not in event:
                     continue
 
@@ -58,6 +63,10 @@ def receive_message():
                 sender_id    = event["sender"]["id"]
                 user_message = event["message"].get("text", "")
                 attachments  = event["message"].get("attachments", [])
+
+                # ── التقاط إعلان المصدر لو الرسالة جاية من إعلان ──
+                if event["message"].get("referral"):
+                    capture_ad_referral(bundle, event, sender_id)
 
                 # ── تجاهل الـ stickers والـ likes (إيماءات مش رسائل) ──
                 sticker_atts = [a for a in attachments if a.get("type") in ("like_heart", "fallback")]
