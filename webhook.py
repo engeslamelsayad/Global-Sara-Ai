@@ -11,7 +11,7 @@ from flask import Blueprint, request, jsonify
 
 from bot_engine import (
     get_tenant_for_page, buffer_message, handle_echo, is_closing_reaction,
-    download_meta_image,
+    download_meta_image, send_message,
 )
 
 webhook_bp = Blueprint("webhook", __name__)
@@ -57,11 +57,36 @@ def receive_message():
 
                 sender_id    = event["sender"]["id"]
                 user_message = event["message"].get("text", "")
+                attachments  = event["message"].get("attachments", [])
 
-                # ── صورة مرفقة ──
+                # ── تجاهل الـ stickers والـ likes (إيماءات مش رسائل) ──
+                sticker_atts = [a for a in attachments if a.get("type") in ("like_heart", "fallback")]
+                has_sticker = any(
+                    a.get("type") == "image" and a.get("payload", {}).get("sticker_id")
+                    for a in attachments
+                )
+                is_like = event["message"].get("sticker_id") or has_sticker or sticker_atts
+                if is_like and not user_message:
+                    print(f"👍 Sticker/like ignored from {sender_id}")
+                    continue
+
+                # ── الرسائل الصوتية: رد توجيهي (مفيش تحويل صوت لنص) ──
+                audio_atts = [a for a in attachments if a.get("type") == "audio"]
+                if audio_atts and not user_message:
+                    print(f"🎤 Voice message from {sender_id} — sending guidance")
+                    bc = bundle["tenant"].bot_config
+                    contact = (bc.contact_number if bc and bc.contact_number else "")
+                    voice_reply = (
+                        "سمعت إنك بعتّ رسالة صوتية 🎤 بس للأسف مش بقدر أسمع الصوت دلوقتي — "
+                        "ممكن تكتبلي اللي محتاجه بالكتابة وأنا تحت أمرك على طول 😊"
+                    )
+                    send_message(bundle, sender_id, voice_reply, page_id, platform)
+                    continue
+
+                # ── صورة مرفقة (مش sticker) ──
                 image_b64, image_media_type = None, "image/jpeg"
-                attachments = event["message"].get("attachments", [])
-                img_attachments = [a for a in attachments if a.get("type") == "image"]
+                img_attachments = [a for a in attachments if a.get("type") == "image"
+                                   and not a.get("payload", {}).get("sticker_id")]
                 if img_attachments:
                     img_url = img_attachments[0].get("payload", {}).get("url", "")
                     page = bundle["pages"].get(page_id)

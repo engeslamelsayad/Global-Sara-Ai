@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 from flask import Blueprint, request
 
-from models import Tenant, Order
+from models import Tenant, Order, Product
 from bot_engine import list_tenant_states
 
 analytics_bp = Blueprint("analytics", __name__)
@@ -33,9 +33,50 @@ def get_tenant_analytics(tenant):
     orders_7d  = [o for o in all_orders if (now - o.created_at) <= timedelta(days=7)]
     orders_30d = [o for o in all_orders if (now - o.created_at) <= timedelta(days=30)]
 
+    # ── normalization: نجمّع تنويعات اسم المنتج تحت الاسم العام للـ tenant ──
+    # نبني خريطة من كلمات كل منتج → اسمه الرسمي في الداتابيز
+    tenant_products = Product.query.filter_by(tenant_id=tenant.id).all()
+
+    def normalize_product(raw_name):
+        """يطابق اسم الطلب مع منتج الـ tenant الفعلي عبر الكلمات المفتاحية أو الاسم"""
+        if not raw_name:
+            return "غير محدد"
+        text = raw_name.strip().lower()
+        best_match = None
+        # 1) الأولوية للكلمات المفتاحية (أدق في تجميع التنويعات)
+        for p in tenant_products:
+            if p.keywords:
+                for kw in p.keywords.split(","):
+                    kw = kw.strip().lower()
+                    if kw and len(kw) >= 3 and kw in text:
+                        return p.name
+        # 2) تطابق مع الاسم الرسمي كامل
+        for p in tenant_products:
+            if p.name and p.name.strip().lower() in text:
+                return p.name
+        # 3) تطابق جزئي: أول كلمتين مميزتين من اسم المنتج موجودين في الطلب
+        for p in tenant_products:
+            if not p.name:
+                continue
+            # نشيل الأقواس والكلمات العامة ونقارن الكلمات الأساسية
+            core = p.name.split("(")[0].strip().lower()
+            core_words = [w for w in core.split() if len(w) >= 3
+                          and w not in ("كريم", "بخاخ", "قلم", "زيت", "سيروم", "مجموعة")]
+            if core_words and all(w in text for w in core_words):
+                return p.name
+        return raw_name.strip()[:40]
+
     orders_by_product = defaultdict(int)
     for o in all_orders:
-        orders_by_product[o.product_name or "غير محدد"] += 1
+        orders_by_product[normalize_product(o.product_name)] += 1
+
+    # ⭐ تقسيم طلبات آخر 24 ساعة حسب المنتج (بالاسم العام الموحّد)
+    orders_24h_by_product = defaultdict(int)
+    for o in orders_24h:
+        orders_24h_by_product[normalize_product(o.product_name)] += 1
+    orders_24h_by_product = dict(
+        sorted(orders_24h_by_product.items(), key=lambda x: x[1], reverse=True)
+    )
 
     # ── حالات المحادثات: من Redis (حالة لحظية) ──
     states = list_tenant_states(tenant.id)
@@ -82,6 +123,7 @@ def get_tenant_analytics(tenant):
         "fu_converted": fu_converted,
         "funnel_counts": dict(funnel_counts),
         "orders_by_product": dict(orders_by_product),
+        "orders_24h_by_product": orders_24h_by_product,   # ⭐ الجديد
         "product_inquiries": dict(product_inquiries),
         "recent_orders": all_orders[:15],
         "updated_at": now.strftime("%Y-%m-%d %H:%M UTC"),
@@ -170,8 +212,13 @@ def build_analytics_html(tenant, data):
   </div>
 </div>
 
+<div class="sec" style="border:2px solid #10b981">
+  <h3>🔥 طلبات آخر 24 ساعة حسب المنتج ({data['orders_last_24h']} طلب)</h3>
+  {_bars(data['orders_24h_by_product'])}
+</div>
+
 <div class="sec"><h3>🔄 Funnel العملاء</h3>{funnel_html}</div>
-<div class="sec"><h3>🏆 أكثر المنتجات طلبات</h3>{_bars(data['orders_by_product'])}</div>
+<div class="sec"><h3>🏆 أكثر المنتجات طلبات (إجمالي)</h3>{_bars(data['orders_by_product'])}</div>
 <div class="sec"><h3>🔍 أكثر المنتجات استفساراً</h3>{_bars(data['product_inquiries'])}</div>
 <div class="sec"><h3>🧾 آخر الطلبات</h3>{orders_html}</div>
 

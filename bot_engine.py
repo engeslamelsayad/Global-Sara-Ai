@@ -274,6 +274,16 @@ def build_system_prompt(bundle, matched_product=None, state=None):
 {"هذا الرقم للواتساب فقط — مش للمكالمات" if bc.contact_channel == "whatsapp" else ""}
 لا تذكري أي رقم آخر أبداً تحت أي ظرف
 
+[⛔ قاعدة الاستبدال والاسترجاع — مهمة جداً]
+لو العميل طلب استبدال أو استرجاع أو مرتجع أو استرداد فلوس:
+❌ ممنوع تسجّلي طلب استرجاع أو تاخدي بياناته لتسجيل مرتجع
+❌ ممنوع تقولي "استرجاع كامل" أو تحددي أي مبلغ هيرجعله
+❌ ممنوع تعملي [ORDER|...] لطلب استرجاع
+✅ طمّنيه إن حقه محفوظ ووجّهيه للتواصل على الرقم الرسمي:
+   "حقك محفوظ تماماً يا فندم وكل عملائنا مقدّرين عندنا 💙 الاستبدال أو الاسترجاع بيتم
+    من خلال التواصل على {('الواتساب' if bc.contact_channel == 'whatsapp' else 'الرقم')}: {bc.contact_number or 'الرقم الرسمي'} — كلّمنا هناك ونظبّطلك كل حاجة"
+السبب: تفاصيل الاسترجاع (زي خصم الشحن) بتتحدد مع فريق خاص، مش البوت. خليكي متعاطفة بلا وعود برقم معيّن.
+
 {smart_rules_txt}
 [⛔ ممنوع رص كل المنتجات]
 لو العميل سأل سؤال عام زي "عندكم إيه؟" أو "بتبيعوا إيه؟" أو "عايز المنتج ده" بدون تحديد مشكلته:
@@ -576,10 +586,10 @@ def _ensure_label_id(label, page_id, access_token):
         for item in resp.get("data", []):
             item_name = item.get("page_label_name") or item.get("name")
             if item_name == label.name:
-                ids[page_id] = item["id"]
+                ids[page_id] = str(item["id"])
                 label.meta_label_ids = json.dumps(ids, ensure_ascii=False)
                 _db.session.commit()
-                return item["id"]
+                return str(item["id"])
     except Exception as e:
         print(f"⚠️ Labels lookup error: {e}")
         return None
@@ -594,11 +604,11 @@ def _ensure_label_id(label, page_id, access_token):
         )
         cj = cr.json()
         if "id" in cj:
-            ids[page_id] = cj["id"]
+            ids[page_id] = str(cj["id"])
             label.meta_label_ids = json.dumps(ids, ensure_ascii=False)
             _db.session.commit()
             print(f"   ➕ label جديدة على Meta: {label.name} ({cj['id']})")
-            return cj["id"]
+            return str(cj["id"])
         elif "error" in cj:
             print(f"❌ فشل إنشاء label '{label.name}': {cj['error'].get('message')}")
     except Exception as e:
@@ -606,22 +616,63 @@ def _ensure_label_id(label, page_id, access_token):
     return None
 
 
+def _refetch_label_id(label, page_id, access_token):
+    """يعيد جلب الـ label_id الصحيح من Meta ويحدّث الكاش (لو المخزّن قديم/غلط)"""
+    from models import db as _db
+    try:
+        r = requests.get(
+            "https://graph.facebook.com/v18.0/me/custom_labels",
+            params={"fields": "id,page_label_name", "access_token": access_token},
+            timeout=10,
+        )
+        for item in r.json().get("data", []):
+            nm = item.get("page_label_name") or item.get("name")
+            if nm == label.name:
+                new_id = str(item["id"])
+                ids = json.loads(label.meta_label_ids or "{}")
+                ids[page_id] = new_id
+                label.meta_label_ids = json.dumps(ids, ensure_ascii=False)
+                _db.session.commit()
+                return new_id
+    except Exception as e:
+        print(f"⚠️ refetch label id error: {e}")
+    return None
+
+
+def _do_label_post(label_id, sender_id, access_token):
+    """ينفّذ POST تطبيق label — بيرجّع (status, resp)"""
+    r = requests.post(
+        f"https://graph.facebook.com/v18.0/{str(label_id)}/label",
+        params={"access_token": access_token},
+        headers={"Content-Type": "application/json"},
+        json={"user": str(sender_id)},
+        timeout=10,
+    )
+    return r.status_code, (r.json() if r.content else {})
+
+
 def _apply_label_to_user(label, sender_id, page_id, access_token):
     label_id = _ensure_label_id(label, page_id, access_token)
     if not label_id:
         return
     try:
-        r = requests.post(
-            f"https://graph.facebook.com/v18.0/{label_id}/label",
-            params={"access_token": access_token},
-            json={"user": sender_id},
-            timeout=10,
-        )
-        if r.status_code == 200:
+        status, resp = _do_label_post(label_id, sender_id, access_token)
+
+        # لو فشل بـ code 100 (ID قديم/غلط) → أعد جلب الـ ID الصح وحاول تاني
+        if status != 200 or not resp.get("success"):
+            if resp.get("error", {}).get("code") == 100:
+                fresh_id = _refetch_label_id(label, page_id, access_token)
+                if fresh_id and str(fresh_id) != str(label_id):
+                    print(f"🔄 label '{label.name}': ID اتغير من {label_id} لـ {fresh_id} — إعادة محاولة")
+                    status, resp = _do_label_post(fresh_id, sender_id, access_token)
+
+        if status == 200 and resp.get("success"):
             print(f"🏷️  '{label.name}' → {sender_id} ✅")
+        elif status == 200:
+            print(f"🏷️  '{label.name}' → {sender_id} (status 200, resp={resp})")
         else:
-            err = r.json().get("error", {})
-            print(f"❌ تطبيق label '{label.name}' فشل: status={r.status_code} code={err.get('code')} — {err.get('message')}")
+            err = resp.get("error", {})
+            print(f"❌ تطبيق label '{label.name}' فشل: status={status} code={err.get('code')} — {err.get('message')}")
     except Exception as e:
         print(f"⚠️ Label apply error: {e}")
 
