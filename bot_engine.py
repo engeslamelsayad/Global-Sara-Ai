@@ -563,7 +563,7 @@ def _ensure_label_id(label, page_id, access_token):
     try:
         r = requests.get(
             "https://graph.facebook.com/v18.0/me/custom_labels",
-            params={"fields": "id,name", "access_token": access_token},
+            params={"fields": "id,page_label_name", "access_token": access_token},
             timeout=10,
         )
         resp = r.json()
@@ -574,7 +574,8 @@ def _ensure_label_id(label, page_id, access_token):
                 print("   ⚠️ الـ token غالباً ناقص صلاحية pages_manage_metadata")
             return None
         for item in resp.get("data", []):
-            if item.get("name") == label.name:
+            item_name = item.get("page_label_name") or item.get("name")
+            if item_name == label.name:
                 ids[page_id] = item["id"]
                 label.meta_label_ids = json.dumps(ids, ensure_ascii=False)
                 _db.session.commit()
@@ -588,7 +589,7 @@ def _ensure_label_id(label, page_id, access_token):
         cr = requests.post(
             "https://graph.facebook.com/v18.0/me/custom_labels",
             params={"access_token": access_token},
-            json={"name": label.name},
+            json={"page_label_name": label.name},
             timeout=10,
         )
         cj = cr.json()
