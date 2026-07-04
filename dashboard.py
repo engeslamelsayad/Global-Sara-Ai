@@ -14,7 +14,7 @@ from flask_login import login_required, current_user
 
 from models import (
     db, Tenant, Product, Policy, BotConfig, Keyword, BotAppId,
-    FollowupStage, Page, Order, SmartRule,
+    FollowupStage, Page, Order, SmartRule, MetaLabel,
 )
 from auth import login_required_dashboard
 from bot_engine import invalidate_tenant_cache
@@ -535,6 +535,71 @@ def smart_rule_delete(rule_id):
     _invalidate(tenant)
     flash("تم حذف القاعدة", "success")
     return redirect(url_for("dashboard.smart_rules_list"))
+
+
+# =====================================================================
+# META LABELS — تسمية labels وربطها بحالات المحادثة
+# =====================================================================
+@dashboard_bp.route("/labels")
+@login_required_dashboard
+def labels_list():
+    tenant = _current_tenant()
+    labels = MetaLabel.query.filter_by(tenant_id=tenant.id).order_by(MetaLabel.created_at).all()
+    return render_template("labels.html", tenant=tenant, labels=labels)
+
+
+@dashboard_bp.route("/labels/add", methods=["POST"])
+@login_required_dashboard
+def label_add():
+    tenant = _current_tenant()
+    name = request.form.get("name", "").strip()
+    trigger_stage = request.form.get("trigger_stage", "none")
+    if name:
+        db.session.add(MetaLabel(
+            tenant_id=tenant.id, name=name, trigger_stage=trigger_stage
+        ))
+        db.session.commit()
+        _invalidate(tenant)
+        flash(f"تمت إضافة label '{name}' ✅", "success")
+    return redirect(url_for("dashboard.labels_list"))
+
+
+@dashboard_bp.route("/labels/<label_id>/edit", methods=["POST"])
+@login_required_dashboard
+def label_edit(label_id):
+    tenant = _current_tenant()
+    label = MetaLabel.query.filter_by(id=label_id, tenant_id=tenant.id).first_or_404()
+    label.name = request.form.get("name", "").strip() or label.name
+    label.trigger_stage = request.form.get("trigger_stage", label.trigger_stage)
+    # لو الاسم اتغير، امسح الـ cache عشان يتعمل label جديدة بالاسم الجديد
+    label.meta_label_ids = "{}"
+    db.session.commit()
+    _invalidate(tenant)
+    flash("تم تحديث الـ label ✅", "success")
+    return redirect(url_for("dashboard.labels_list"))
+
+
+@dashboard_bp.route("/labels/<label_id>/toggle", methods=["POST"])
+@login_required_dashboard
+def label_toggle(label_id):
+    tenant = _current_tenant()
+    label = MetaLabel.query.filter_by(id=label_id, tenant_id=tenant.id).first_or_404()
+    label.is_active = not label.is_active
+    db.session.commit()
+    _invalidate(tenant)
+    return redirect(url_for("dashboard.labels_list"))
+
+
+@dashboard_bp.route("/labels/<label_id>/delete", methods=["POST"])
+@login_required_dashboard
+def label_delete(label_id):
+    tenant = _current_tenant()
+    label = MetaLabel.query.filter_by(id=label_id, tenant_id=tenant.id).first_or_404()
+    db.session.delete(label)
+    db.session.commit()
+    _invalidate(tenant)
+    flash("تم حذف الـ label", "success")
+    return redirect(url_for("dashboard.labels_list"))
 
 
 # =====================================================================

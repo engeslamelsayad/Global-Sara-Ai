@@ -213,6 +213,7 @@ def build_system_prompt(bundle, matched_product=None, state=None):
     forbidden_words   = json.loads(bc.forbidden_words or "[]")
     forbidden_openers = json.loads(bc.forbidden_openers or "[]")
 
+    products_count = len(products)
     products_block = "\n".join(
         f"- {p.name}: {p.price_note or f'{p.price_amount} ج'}"
         for p in products
@@ -274,7 +275,14 @@ def build_system_prompt(bundle, matched_product=None, state=None):
 لا تذكري أي رقم آخر أبداً تحت أي ظرف
 
 {smart_rules_txt}
-[كل المنتجات المتاحة]
+[⛔ ممنوع رص كل المنتجات]
+لو العميل سأل سؤال عام زي "عندكم إيه؟" أو "بتبيعوا إيه؟" أو "عايز المنتج ده" بدون تحديد مشكلته:
+❌ ممنوع ترصّي قائمة المنتجات ({products_count} منتج) أو أي جزء منها
+✅ بدل كده قولي إن عندنا {products_count} منتج لمشاكل مختلفة، واسأليه عن مشكلته:
+   مثال: "عندنا {products_count} منتج طبيعي لمشاكل مختلفة 😊 قوليلي إيه اللي بيواجهك وأرشحلك المناسب"
+لما يذكر مشكلته المحددة → وقتها بس ترشحي المنتج المناسب. تعاملي كبائع شاطر مش كتالوج.
+
+[قائمة المنتجات — للرجوع الداخلي فقط، مش للعرض على العميل]
 {products_block}
 
 [تسجيل الطلب]
@@ -282,6 +290,15 @@ def build_system_prompt(bundle, matched_product=None, state=None):
 [ORDER|الاسم|الموبايل|العنوان|المنتج]
 لو العميل عنده خصم من رسالة متابعة سابقة، أضيفي |DISCOUNT{{نسبة}} في الآخر.
 هذا السطر للنظام فقط، لا يظهر للعميل.
+
+[⛔⛔ قاعدة حرجة — لا تكرري طلب بيانات موجودة]
+راجعي المحادثة كلها قبل ما تطلبي أي بيانات:
+- لو العميل بعت اسمه قبل كده → احفظيه، ممنوع تطلبيه تاني
+- لو بعت رقم موبايله → ممنوع تطلبيه تاني
+- لو بعت عنوانه → ممنوع تطلبيه تاني
+- لو حدد المنتج → ممنوع تسأليه عنه تاني
+اطلبي البيانات الناقصة فقط. لو عندك كل البيانات → سجلي الطلب فوراً بـ [ORDER|...] من غير ما تطلبي حاجة تاني.
+تكرار طلب البيانات بيزعّل العميل ويخسرنا الأوردر — أسوأ خطأ ممكن تعمليه.
 
 [قاعدة صارمة — لا تكرري تسجيل الطلب]
 لو سبق وقلتِ "طلبك اتسجل" في هذه المحادثة، لا تكتبي [ORDER|...] مرة أخرى أبداً.
@@ -530,6 +547,118 @@ def download_meta_image(image_url, access_token):
 
 
 # =====================================================================
+# META CUSTOM LABELS — تطبيق labels على العملاء حسب حالة المحادثة
+# =====================================================================
+def _ensure_label_id(label, page_id, access_token):
+    """
+    يتأكد إن الـ label موجودة على Meta لهذه الصفحة، وبيرجّع الـ meta label id.
+    بيكاش الـ id في عمود meta_label_ids (JSON per page) لتفادي إعادة الإنشاء.
+    """
+    from models import db as _db
+    ids = json.loads(label.meta_label_ids or "{}")
+    if page_id in ids:
+        return ids[page_id]
+
+    # 1) دوّر على label بنفس الاسم على Meta (اتعملت قبل كده)
+    try:
+        r = requests.get(
+            "https://graph.facebook.com/v18.0/me/custom_labels",
+            params={"fields": "id,name", "access_token": access_token},
+            timeout=10,
+        )
+        resp = r.json()
+        if "error" in resp:
+            err = resp["error"]
+            print(f"❌ Labels GET error (page {page_id}): code={err.get('code')} — {err.get('message')}")
+            if err.get("code") in (10, 200, 190):
+                print("   ⚠️ الـ token غالباً ناقص صلاحية pages_manage_metadata")
+            return None
+        for item in resp.get("data", []):
+            if item.get("name") == label.name:
+                ids[page_id] = item["id"]
+                label.meta_label_ids = json.dumps(ids, ensure_ascii=False)
+                _db.session.commit()
+                return item["id"]
+    except Exception as e:
+        print(f"⚠️ Labels lookup error: {e}")
+        return None
+
+    # 2) اعمل الـ label من جديد
+    try:
+        cr = requests.post(
+            "https://graph.facebook.com/v18.0/me/custom_labels",
+            params={"access_token": access_token},
+            json={"name": label.name},
+            timeout=10,
+        )
+        cj = cr.json()
+        if "id" in cj:
+            ids[page_id] = cj["id"]
+            label.meta_label_ids = json.dumps(ids, ensure_ascii=False)
+            _db.session.commit()
+            print(f"   ➕ label جديدة على Meta: {label.name} ({cj['id']})")
+            return cj["id"]
+        elif "error" in cj:
+            print(f"❌ فشل إنشاء label '{label.name}': {cj['error'].get('message')}")
+    except Exception as e:
+        print(f"⚠️ Label create error: {e}")
+    return None
+
+
+def _apply_label_to_user(label, sender_id, page_id, access_token):
+    label_id = _ensure_label_id(label, page_id, access_token)
+    if not label_id:
+        return
+    try:
+        r = requests.post(
+            f"https://graph.facebook.com/v18.0/{label_id}/label",
+            params={"access_token": access_token},
+            json={"user": sender_id},
+            timeout=10,
+        )
+        if r.status_code == 200:
+            print(f"🏷️  '{label.name}' → {sender_id} ✅")
+        else:
+            err = r.json().get("error", {})
+            print(f"❌ تطبيق label '{label.name}' فشل: status={r.status_code} code={err.get('code')} — {err.get('message')}")
+    except Exception as e:
+        print(f"⚠️ Label apply error: {e}")
+
+
+def apply_stage_labels(bundle, sender_id, page_id, stage):
+    """
+    يطبّق كل الـ labels المرتبطة بحالة معينة (trigger_stage) — non-blocking.
+    stage: interested / objection / ordered / complaint / human_needed
+    """
+    from models import MetaLabel
+    from flask import current_app
+    tenant = bundle["tenant"]
+    page = bundle["pages"].get(page_id)
+    if not page or not page.access_token:
+        return
+
+    labels = MetaLabel.query.filter_by(
+        tenant_id=tenant.id, trigger_stage=stage, is_active=True
+    ).all()
+    if not labels:
+        return
+
+    label_ids = [l.id for l in labels]
+    access_token = page.access_token
+    app_obj = current_app._get_current_object()
+
+    def _worker():
+        # الـ thread محتاج app context خاص بيه للـ DB operations
+        with app_obj.app_context():
+            for lid in label_ids:
+                lbl = MetaLabel.query.get(lid)
+                if lbl:
+                    _apply_label_to_user(lbl, sender_id, page_id, access_token)
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+
+# =====================================================================
 # MAIN PROCESSING — تُستدعى بعد انتهاء الـ debounce
 # =====================================================================
 def do_process_message(tenant_id, sender_id, user_message, page_id, platform,
@@ -563,6 +692,7 @@ def do_process_message(tenant_id, sender_id, user_message, page_id, platform,
         send_message(bundle, sender_id,
             "تمام! هبعتلك موظف متخصص دلوقتي. لحظة صغيرة ومحدش هيسيبك وحدك 💙",
             page_id, platform)
+        apply_stage_labels(bundle, sender_id, page_id, "human_needed")
         save_state(tenant_id, sender_id, state)
         return
 
@@ -575,6 +705,7 @@ def do_process_message(tenant_id, sender_id, user_message, page_id, platform,
     if new_order:
         save_order(bundle["tenant"], new_order, page_id)
         print(f"✅ Order saved for tenant {tenant_id}: {new_order['product']}")
+        apply_stage_labels(bundle, sender_id, page_id, "ordered")
 
     if matched_product and matched_product.product_link:
         if matched_product.product_key not in state.get("links_sent", []):
@@ -584,11 +715,18 @@ def do_process_message(tenant_id, sender_id, user_message, page_id, platform,
                 page_id, platform)
             state.setdefault("links_sent", []).append(matched_product.product_key)
 
+    # ── labels حسب الحالة ──
+    if state.get("stage") == "INTERESTED":
+        apply_stage_labels(bundle, sender_id, page_id, "interested")
+    elif state.get("stage") == "OBJECTION":
+        apply_stage_labels(bundle, sender_id, page_id, "objection")
+
     is_complaint = matches_category(user_message, keywords, "complaint")
     if is_complaint and not state.get("has_complaint"):
         state["has_complaint"] = True
         state["stage"] = "COMPLAINT"
         print(f"🚨 Complaint detected for {sender_id}")
+        apply_stage_labels(bundle, sender_id, page_id, "complaint")
 
     save_state(tenant_id, sender_id, state)
     print(f"✅ Done — tenant={tenant_id[:8]} stage={state['stage']}")

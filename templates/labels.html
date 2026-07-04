@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}تصنيفات المحادثات{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">تصنيفات المحادثات (Labels) 🏷️</h1>
+  <p class="page-sub">سمِّ التصنيفات وحدد متى البوت يطبّقها على العميل تلقائياً في Meta Inbox</p>
+</div>
+
+<div class="card" style="border:1px solid #DDD0F8; background:linear-gradient(135deg,#FBF9FF,#F4EEFF); margin-bottom:20px">
+  <h3 style="margin-top:0">💡 إزاي بيشتغل؟</h3>
+  <p style="font-size:13px; line-height:1.8; margin:0">
+    كل تصنيف بتربطه بحالة معينة للمحادثة. لما العميل يوصل للحالة دي، البوت بيحط التصنيف عليه تلقائياً في صفحتك على Meta.
+    مثال: تصنيف "شكاوى" مربوط بحالة "شكوى" — أي عميل يشتكي بياخد التصنيف ده فوراً، فتقدر تتابع الشكاوى بسهولة.
+  </p>
+  <div style="background:#FEF3E2; border-radius:10px; padding:10px 14px; margin-top:12px; font-size:12px; color:#B45309">
+    ⚠️ لازم الـ Access Token بتاع صفحتك يكون عليه صلاحية <strong>pages_manage_metadata</strong> عشان ده يشتغل.
+  </div>
+</div>
+
+<div class="card">
+  <h3>+ إضافة تصنيف جديد</h3>
+  <form method="POST" action="{{ url_for('dashboard.label_add') }}">
+    <label>اسم التصنيف <span class="hint">زي ما هيظهر في Meta</span></label>
+    <input type="text" name="name" required placeholder="مثال: شكاوى، عميل مهتم، أوردر مسجل">
+
+    <label>متى يتطبّق تلقائياً؟</label>
+    <select name="trigger_stage">
+      <option value="none">يدوي فقط (البوت مش بيطبّقه)</option>
+      <option value="interested">🟢 لما العميل يهتم بمنتج</option>
+      <option value="objection">🟡 لما العميل يعترض (غالي/مش متأكد)</option>
+      <option value="ordered">✅ لما العميل يسجّل طلب</option>
+      <option value="complaint">🚨 لما العميل يشتكي</option>
+      <option value="human_needed">🙋 لما العميل يطلب موظف بشري</option>
+    </select>
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">إضافة التصنيف</button>
+    </div>
+  </form>
+</div>
+
+<div class="card" style="padding:0; overflow:hidden">
+  {% if labels %}
+  <table>
+    <thead><tr><th>الاسم</th><th>يتطبّق عند</th><th>الحالة</th><th></th></tr></thead>
+    <tbody>
+      {% set stage_map = {
+        'none':'يدوي فقط','interested':'🟢 اهتمام','objection':'🟡 اعتراض',
+        'ordered':'✅ طلب','complaint':'🚨 شكوى','human_needed':'🙋 طلب موظف'} %}
+      {% for l in labels %}
+      <tr style="{{ 'opacity:0.5' if not l.is_active }}">
+        <td>
+          <form method="POST" action="{{ url_for('dashboard.label_edit', label_id=l.id) }}" style="display:flex; gap:6px; align-items:center">
+            <input type="text" name="name" value="{{ l.name }}" style="width:auto; padding:6px 10px; font-size:13px">
+            <select name="trigger_stage" style="width:auto; padding:6px; font-size:12px">
+              {% for k, v in stage_map.items() %}
+              <option value="{{ k }}" {{ 'selected' if l.trigger_stage==k }}>{{ v }}</option>
+              {% endfor %}
+            </select>
+            <button class="btn btn-secondary btn-sm" type="submit">حفظ</button>
+          </form>
+        </td>
+        <td><span class="badge badge-purple">{{ stage_map.get(l.trigger_stage, l.trigger_stage) }}</span></td>
+        <td>
+          {% if l.is_active %}<span class="badge badge-green">مفعّل</span>
+          {% else %}<span class="badge badge-red">موقوف</span>{% endif %}
+        </td>
+        <td style="text-align:left; white-space:nowrap">
+          <form method="POST" action="{{ url_for('dashboard.label_toggle', label_id=l.id) }}" style="display:inline">
+            <button class="btn btn-secondary btn-sm" type="submit">{{ 'إيقاف' if l.is_active else 'تفعيل' }}</button>
+          </form>
+          <form method="POST" action="{{ url_for('dashboard.label_delete', label_id=l.id) }}" style="display:inline"
+                onsubmit="return confirm('حذف هذا التصنيف؟')">
+            <button class="btn btn-danger btn-sm" type="submit">حذف</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state"><p>لسه مفيش تصنيفات. أضف أول تصنيف فوق 👆</p></div>
+  {% endif %}
+</div>
+{% endblock %}

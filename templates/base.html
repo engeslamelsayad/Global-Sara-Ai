@@ -155,6 +155,9 @@
   <a class="nav-link {{ 'active' if request.endpoint=='dashboard.keywords_list' }}" href="{{ url_for('dashboard.keywords_list') }}">
     <span class="nav-icon">🔑</span> الكلمات المفتاحية
   </a>
+  <a class="nav-link {{ 'active' if request.endpoint=='dashboard.labels_list' }}" href="{{ url_for('dashboard.labels_list') }}">
+    <span class="nav-icon">🏷️</span> تصنيفات المحادثات
+  </a>
   <a class="nav-link {{ 'active' if request.endpoint=='dashboard.smart_rules_list' }}" href="{{ url_for('dashboard.smart_rules_list') }}">
     <span class="nav-icon">⚡</span> القواعد الذكية
   </a>

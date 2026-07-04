@@ -73,8 +73,25 @@ def run():
                 "CREATE INDEX IF NOT EXISTS ix_smart_rules_tenant ON smart_rules(tenant_id)",
                 "smart_rules index")
         else:
-            # SQLite: db.create_all() ينشئ الجداول الجديدة تلقائياً
             print("  ⏭  SQLite: smart_rules ستُنشأ بـ db.create_all() تلقائياً")
+
+        print("\n=== 4. جدول meta_labels (جديد) ===")
+        if is_pg:
+            ok_all &= safe_alter(conn, """
+                CREATE TABLE IF NOT EXISTS meta_labels (
+                    id             VARCHAR(36) PRIMARY KEY,
+                    tenant_id      VARCHAR(36) NOT NULL REFERENCES tenants(id),
+                    name           VARCHAR(120) NOT NULL,
+                    trigger_stage  VARCHAR(40) DEFAULT 'none',
+                    is_active      BOOLEAN DEFAULT TRUE,
+                    meta_label_ids TEXT DEFAULT '{}',
+                    created_at     TIMESTAMP DEFAULT NOW()
+                )""", "meta_labels table")
+            ok_all &= safe_alter(conn,
+                "CREATE INDEX IF NOT EXISTS ix_meta_labels_tenant ON meta_labels(tenant_id)",
+                "meta_labels index")
+        else:
+            print("  ⏭  SQLite: meta_labels ستُنشأ بـ db.create_all() تلقائياً")
 
         conn.commit()
         conn.close()

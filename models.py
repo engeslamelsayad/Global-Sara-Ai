@@ -58,6 +58,7 @@ class Tenant(db.Model):
     orders        = db.relationship("Order",          backref="tenant", cascade="all, delete-orphan")
     smart_rules   = db.relationship("SmartRule",      backref="tenant", cascade="all, delete-orphan",
                                      order_by="SmartRule.created_at")
+    meta_labels   = db.relationship("MetaLabel",      backref="tenant", cascade="all, delete-orphan")
 
     def to_dict(self):
         return {
@@ -384,3 +385,38 @@ class SmartRule(db.Model):
             "category": self.category, "is_active": self.is_active,
         }
 
+
+# =====================================================================
+# META_LABEL — تسمية labels مخصصة وربطها بحالات المحادثة
+# =====================================================================
+class MetaLabel(db.Model):
+    """
+    label يعرّفها مالك البزنس ويربطها بحالة (trigger) معينة.
+    لما المحادثة توصل للحالة دي، البوت بيطبّق الـ label على العميل في Meta.
+
+    trigger_stage القيم الممكنة:
+      interested    — العميل أبدى اهتمام بمنتج
+      objection     — العميل اعترض (غالي/مش متأكد)
+      ordered       — العميل سجّل طلب
+      complaint     — شكوى
+      human_needed  — طلب موظف بشري
+      none          — يدوي فقط (البوت مش بيطبّقها تلقائياً)
+    """
+    __tablename__ = "meta_labels"
+
+    id            = db.Column(db.String(36), primary_key=True, default=gen_uuid)
+    tenant_id     = db.Column(db.String(36), db.ForeignKey("tenants.id"), nullable=False, index=True)
+    name          = db.Column(db.String(120), nullable=False)   # الاسم المعروض في Meta
+    trigger_stage = db.Column(db.String(40), default="none")    # الحالة اللي بتفعّلها
+    is_active     = db.Column(db.Boolean, default=True)
+    # cache لـ label IDs على مستوى كل صفحة: {page_id: meta_label_id}
+    meta_label_ids = db.Column(db.Text, default="{}")           # JSON
+    created_at    = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        import json as _j
+        return {
+            "id": self.id, "name": self.name,
+            "trigger_stage": self.trigger_stage, "is_active": self.is_active,
+            "meta_label_ids": _j.loads(self.meta_label_ids or "{}"),
+        }
