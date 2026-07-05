@@ -42,6 +42,11 @@ class Tenant(db.Model):
     # تكامل Google Sheet — رابط Apps Script Web App لاستقبال الطلبات
     google_sheet_url      = db.Column(db.String(500))
 
+    # تكامل Telegram — لإرسال التقرير الأسبوعي للتاجر
+    telegram_chat_id      = db.Column(db.String(60))    # معرّف محادثة التاجر
+    telegram_link_code    = db.Column(db.String(20))    # كود مؤقت لربط الحساب
+    telegram_enabled      = db.Column(db.Boolean, default=False)
+
     is_active     = db.Column(db.Boolean, default=True)
     plan          = db.Column(db.String(40), default="trial")
     created_at    = db.Column(db.DateTime, default=datetime.utcnow)

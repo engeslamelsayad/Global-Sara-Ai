@@ -158,6 +158,9 @@
   <a class="nav-link {{ 'active' if request.endpoint=='dashboard.labels_list' }}" href="{{ url_for('dashboard.labels_list') }}">
     <span class="nav-icon">🏷️</span> تصنيفات المحادثات
   </a>
+  <a class="nav-link {{ 'active' if request.endpoint=='dashboard.telegram_settings' }}" href="{{ url_for('dashboard.telegram_settings') }}">
+    <span class="nav-icon">📊</span> تقارير تليجرام
+  </a>
   <a class="nav-link {{ 'active' if request.endpoint=='dashboard.smart_rules_list' }}" href="{{ url_for('dashboard.smart_rules_list') }}">
     <span class="nav-icon">⚡</span> القواعد الذكية
   </a>

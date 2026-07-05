@@ -23,6 +23,10 @@ app.register_blueprint(analytics_bp)
 app.register_blueprint(auth_bp)
 app.register_blueprint(dashboard_bp)
 
+# بدء المجدول المركزي (تقارير تليجرام الأسبوعية + معالجة الربط)
+from scheduler import start_scheduler
+start_scheduler(app)
+
 
 @app.route("/")
 def home():

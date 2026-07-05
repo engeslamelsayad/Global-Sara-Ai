@@ -45,6 +45,16 @@ def run():
             "ALTER TABLE users ADD COLUMN analytics_key VARCHAR(100)",
             "users.analytics_key")
 
+        print("\n=== 1ب. جدول tenants (تليجرام) ===")
+        for col, typ in [
+            ("telegram_chat_id",   "VARCHAR(60)"),
+            ("telegram_link_code", "VARCHAR(20)"),
+            ("telegram_enabled",   "BOOLEAN DEFAULT FALSE"),
+        ]:
+            ok_all &= safe_alter(conn,
+                f"ALTER TABLE tenants ADD COLUMN {col} {typ}",
+                f"tenants.{col}")
+
         print("\n=== 2. جدول products (الحقول الجديدة) ===")
         for col, typ in [
             ("features",         "TEXT"),

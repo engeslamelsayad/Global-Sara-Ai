@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}تقارير تليجرام{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">تقارير تليجرام 📊</h1>
+  <p class="page-sub">استقبل تقرير أسبوعي عن أداء متجرك كل سبت الساعة 9 صباحاً</p>
+</div>
+
+{% if tenant.telegram_enabled %}
+<div class="card" style="border:2px solid #10b981; background:linear-gradient(135deg,#F0FDF4,#DCFCE7)">
+  <h3 style="margin-top:0; color:#059669">✅ تليجرام مربوط</h3>
+  <p style="font-size:14px; line-height:1.8">
+    متجرك مربوط بنجاح. هيوصلك تقرير أسبوعي كل يوم سبت الساعة 9 صباحاً بيشمل:
+    عدد الطلبات، معدل التحويل، أكتر منتج مبيعاً، والفرص الضايعة.
+  </p>
+  <div style="display:flex; gap:10px; margin-top:16px">
+    <button class="btn btn-primary" onclick="sendTest()">📤 ابعت تقرير تجريبي دلوقتي</button>
+    <form method="POST" action="{{ url_for('dashboard.telegram_disconnect') }}" style="display:inline"
+          onsubmit="return confirm('فصل تليجرام؟ مش هيوصلك تقارير بعد كده')">
+      <button class="btn btn-danger" type="submit">فصل تليجرام</button>
+    </form>
+  </div>
+  <div id="test-result" style="margin-top:12px; font-size:14px"></div>
+</div>
+{% else %}
+<div class="card">
+  <h3 style="margin-top:0">🔗 اربط تليجرام في 3 خطوات</h3>
+
+  <div style="background:#F8FAFC; border-radius:12px; padding:16px; margin:16px 0">
+    <div style="display:flex; gap:12px; align-items:start; margin-bottom:16px">
+      <span style="background:#6D28D9; color:#fff; width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:700; flex-shrink:0">1</span>
+      <div>
+        <strong>افتح بوت التقارير على تليجرام</strong>
+        {% if bot_username %}
+        <p style="margin:6px 0 0"><a href="https://t.me/{{ bot_username }}" target="_blank" style="color:#6D28D9; font-weight:700">@{{ bot_username }} ←</a></p>
+        {% else %}
+        <p style="margin:6px 0 0; color:#94a3b8; font-size:13px">ابحث عن بوت المنصة على تليجرام</p>
+        {% endif %}
+      </div>
+    </div>
+
+    <div style="display:flex; gap:12px; align-items:start; margin-bottom:16px">
+      <span style="background:#6D28D9; color:#fff; width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:700; flex-shrink:0">2</span>
+      <div style="flex:1">
+        <strong>اضغط الزر ده عشان تاخد كود الربط</strong>
+        <div style="margin-top:8px">
+          <button class="btn btn-primary" onclick="genCode()">🔑 توليد كود الربط</button>
+        </div>
+        <div id="link-code" style="display:none; margin-top:12px">
+          <div style="background:#1E293B; color:#fff; padding:14px 18px; border-radius:10px; font-family:monospace; font-size:20px; font-weight:700; letter-spacing:2px; text-align:center; user-select:all">
+            <span id="code-value">—</span>
+          </div>
+          <p style="font-size:12px; color:#94a3b8; margin:8px 0 0; text-align:center">انسخ الكود ده وابعته للبوت على تليجرام</p>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:12px; align-items:start">
+      <span style="background:#6D28D9; color:#fff; width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:700; flex-shrink:0">3</span>
+      <div>
+        <strong>ابعت الكود للبوت</strong>
+        <p style="margin:6px 0 0; color:#64748b; font-size:13px">
+          الصق الكود في محادثة البوت واضغط إرسال. هيرد عليك بتأكيد الربط فوراً ✅
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <p style="font-size:13px; color:#94a3b8">
+    💡 بعد الربط، هيوصلك تقرير كل سبت الساعة 9 صباحاً — تقدر تفصله في أي وقت.
+  </p>
+</div>
+{% endif %}
+
+<script>
+async function genCode(){
+  const btn = event.target;
+  btn.disabled = true; btn.textContent = '⏳ جاري التوليد...';
+  try {
+    const res = await fetch("{{ url_for('dashboard.telegram_generate_code') }}", {method:'POST'});
+    const data = await res.json();
+    document.getElementById('code-value').textContent = data.code;
+    document.getElementById('link-code').style.display = 'block';
+    btn.textContent = '🔄 توليد كود جديد';
+  } catch(e){ alert('حصل خطأ، حاول تاني'); btn.textContent = '🔑 توليد كود الربط'; }
+  finally { btn.disabled = false; }
+}
+
+async function sendTest(){
+  const btn = event.target;
+  const box = document.getElementById('test-result');
+  btn.disabled = true; btn.textContent = '⏳ جاري الإرسال...';
+  try {
+    const res = await fetch("{{ url_for('dashboard.telegram_test') }}", {method:'POST'});
+    const data = await res.json();
+    if(data.ok){
+      box.innerHTML = '<span style="color:#059669">✅ اتبعت! افتح تليجرام وشوف التقرير</span>';
+    } else {
+      box.innerHTML = '<span style="color:#ef4444">❌ ' + (data.error || 'فشل الإرسال') + '</span>';
+    }
+  } catch(e){ box.innerHTML = '<span style="color:#ef4444">❌ حصل خطأ</span>'; }
+  finally { btn.disabled = false; btn.textContent = '📤 ابعت تقرير تجريبي دلوقتي'; }
+}
+</script>
+{% endblock %}

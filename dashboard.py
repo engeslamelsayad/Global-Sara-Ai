@@ -603,6 +603,58 @@ def label_delete(label_id):
 
 
 # =====================================================================
+# TELEGRAM — ربط تقارير أسبوعية على تليجرام
+# =====================================================================
+@dashboard_bp.route("/telegram")
+@login_required_dashboard
+def telegram_settings():
+    import os
+    tenant = _current_tenant()
+    bot_username = os.environ.get("TELEGRAM_BOT_USERNAME", "")
+    return render_template("telegram.html", tenant=tenant, bot_username=bot_username)
+
+
+@dashboard_bp.route("/telegram/generate-code", methods=["POST"])
+@login_required_dashboard
+def telegram_generate_code():
+    import random, string
+    tenant = _current_tenant()
+    # كود ربط قصير وفريد
+    code = "LINK-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
+    tenant.telegram_link_code = code
+    db.session.commit()
+    _invalidate(tenant)
+    return jsonify({"code": code})
+
+
+@dashboard_bp.route("/telegram/disconnect", methods=["POST"])
+@login_required_dashboard
+def telegram_disconnect():
+    tenant = _current_tenant()
+    tenant.telegram_chat_id = None
+    tenant.telegram_enabled = False
+    tenant.telegram_link_code = None
+    db.session.commit()
+    _invalidate(tenant)
+    flash("تم فصل تليجرام", "success")
+    return redirect(url_for("dashboard.telegram_settings"))
+
+
+@dashboard_bp.route("/telegram/test", methods=["POST"])
+@login_required_dashboard
+def telegram_test():
+    """يبعت تقرير تجريبي فوراً للتأكد إن الربط شغّال"""
+    import telegram_bot, analytics
+    tenant = _current_tenant()
+    if not tenant.telegram_enabled or not tenant.telegram_chat_id:
+        return jsonify({"ok": False, "error": "لم يتم ربط تليجرام بعد"}), 400
+    data = analytics.get_tenant_analytics(tenant)
+    report = telegram_bot.build_weekly_report(tenant, data)
+    ok = telegram_bot.send_message(tenant.telegram_chat_id, report)
+    return jsonify({"ok": ok})
+
+
+# =====================================================================
 # PROFILE — مفتاح التحليلات
 # =====================================================================
 @dashboard_bp.route("/profile", methods=["GET", "POST"])
