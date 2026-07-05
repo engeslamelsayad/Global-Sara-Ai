@@ -177,19 +177,54 @@ def invalidate_tenant_cache(page_id=None):
 # =====================================================================
 # RAG — البحث عن المنتج المناسب من رسالة العميل
 # =====================================================================
+def _normalize_ar(text):
+    """تطبيع النص العربي: توحيد الهمزات والألف والياء والتاء المربوطة"""
+    if not text:
+        return ""
+    text = text.lower().strip()
+    # توحيد الألف بأشكالها
+    text = text.replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
+    # توحيد الياء والألف المقصورة
+    text = text.replace("ى", "ي")
+    # توحيد التاء المربوطة والهاء
+    text = text.replace("ة", "ه")
+    # إزالة التشكيل
+    for d in "ًٌٍَُِّْ":
+        text = text.replace(d, "")
+    return text
+
+
+def _is_strong_match(message, product):
+    """
+    يتأكد إن الرسالة فيها كلمة مفتاحية كاملة للمنتج (مطابقة قوية)،
+    مش مجرد جزء كلمة عام زي 'الجلدية' اللي ممكن تطابق منتجات كتير.
+    """
+    if not product or not product.keywords:
+        return False
+    msg_norm = _normalize_ar(message)
+    for kw in product.keywords.split(","):
+        kw_norm = _normalize_ar(kw)
+        # كلمة مفتاحية مميزة (أطول من 4 حروف) وموجودة كاملة = مطابقة قوية
+        if len(kw_norm) >= 4 and kw_norm in msg_norm:
+            return True
+    return False
+
+
 def find_relevant_product(message, products):
     """بحث بسيط بالكلمات المفتاحية — يرجع أول منتج متطابق أو None"""
-    msg_lower = message.lower()
+    msg_norm = _normalize_ar(message)
     best_match, best_score = None, 0
 
     for product in products:
         score = 0
         kw_list = [k.strip() for k in (product.keywords or "").split(",") if k.strip()]
         for kw in kw_list:
-            if kw.lower() in msg_lower:
+            if _normalize_ar(kw) in msg_norm:
                 score += 1
-        if product.name and any(word in msg_lower for word in product.name.split()):
-            score += 1
+        if product.name:
+            for word in product.name.split():
+                if len(word) >= 3 and _normalize_ar(word) in msg_norm:
+                    score += 1
         if score > best_score:
             best_score, best_match = score, product
 
@@ -444,13 +479,19 @@ def get_ai_response(bundle, sender_id, user_message, state,
 
     matched_product = find_relevant_product(user_message, products)
 
-    # ── عميل جاي من إعلان: لو الرسالة مفيهاش منتج واضح، استخدم منتج الإعلان ──
-    # ده بيحل مشكلة "بكام؟" لما العميل يسأل من غير ما يسمّي المنتج
-    if not matched_product and state.get("source_ad_product_key"):
-        ad_key = state["source_ad_product_key"]
-        matched_product = next((p for p in products if p.product_key == ad_key), None)
-        if matched_product:
-            print(f"🎯 استخدام منتج الإعلان في السياق: {matched_product.name}")
+    # ── عميل جاي من إعلان: فضّل منتج الإعلان في بداية المحادثة ──
+    # ده بيحل مشكلتين:
+    # 1. "بكام؟" من غير اسم منتج → يستخدم منتج الإعلان
+    # 2. رسالة فيها خطأ إملائي طابقت منتج غلط → منتج الإعلان أدق
+    ad_key = state.get("source_ad_product_key")
+    if ad_key and not state.get("links_sent"):
+        # لسه في بداية المحادثة (مبعتناش link) والعميل جه من إعلان
+        ad_product = next((p for p in products if p.product_key == ad_key), None)
+        if ad_product:
+            # لو مفيش مطابقة، أو المطابقة مش هي منتج الإعلان لكن ضعيفة → فضّل الإعلان
+            if not matched_product or not _is_strong_match(user_message, matched_product):
+                matched_product = ad_product
+                print(f"🎯 تفضيل منتج الإعلان: {ad_product.name}")
 
     system_blocks   = build_system_prompt(bundle, matched_product, state)
 

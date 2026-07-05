@@ -108,6 +108,10 @@ def get_tenant_analytics(tenant):
 
     conversion_rate = (len(all_orders) / total_conversations * 100) if total_conversations else 0
 
+    # ══ لوحة الفرص الضايعة ══════════════════════════════
+    # تحليل يوضّح للتاجر فين بيخسر مبيعات
+    lost = _compute_lost_opportunities(states, tenant_products, normalize_product)
+
     return {
         "total_conversations": total_conversations,
         "active_last_hour": active_last_hour,
@@ -126,7 +130,69 @@ def get_tenant_analytics(tenant):
         "orders_24h_by_product": orders_24h_by_product,   # ⭐ الجديد
         "product_inquiries": dict(product_inquiries),
         "recent_orders": all_orders[:15],
+        "lost_opportunities": lost,   # ⭐ الفرص الضايعة
         "updated_at": now.strftime("%Y-%m-%d %H:%M UTC"),
+    }
+
+
+def _compute_lost_opportunities(states, tenant_products, normalize_fn):
+    """
+    يحلّل المحادثات ويكتشف الفرص الضايعة:
+    - عملاء اهتموا بمنتج وما اشتروش
+    - عملاء اعترضوا على السعر
+    - منتجات بتتسأل كتير وبتتباع قليل
+    """
+    # خريطة product_key → اسم المنتج
+    key_to_name = {p.product_key: p.name for p in tenant_products}
+
+    interested_no_order = 0    # وصلوا INTERESTED وما عملوش أوردر
+    objections          = 0    # اعترضوا (غالي/مش متأكد/بعدين)
+    abandoned_at_data   = 0    # كانوا بيسجلوا وسابوا
+
+    # لكل منتج: كام سأل عنه وكام اشتراه
+    product_asked  = defaultdict(int)
+    product_bought = defaultdict(int)
+
+    for s in states:
+        stage    = s.get("stage", "NEW")
+        has_order = s.get("has_order", False)
+        asked    = s.get("products_asked", [])
+
+        # عملاء مهتمين بس ما اشتروش
+        if stage in ("INTERESTED", "OBJECTION") and not has_order:
+            interested_no_order += 1
+        if stage == "OBJECTION":
+            objections += 1
+
+        # منتجات: سؤال مقابل شراء
+        for pk in asked:
+            product_asked[pk] += 1
+        if has_order:
+            # نحسب المنتج اللي اتطلب (آخر منتج في القائمة غالباً)
+            if asked:
+                product_bought[asked[-1]] += 1
+
+    # المنتجات اللي بتتسأل كتير وبتتباع قليل (أكبر فجوة)
+    gap_products = []
+    for pk, asked_count in product_asked.items():
+        bought = product_bought.get(pk, 0)
+        if asked_count >= 2:   # على الأقل سؤالين عشان يبقى ذو دلالة
+            gap = asked_count - bought
+            conv = (bought / asked_count * 100) if asked_count else 0
+            gap_products.append({
+                "name": key_to_name.get(pk, pk),
+                "asked": asked_count,
+                "bought": bought,
+                "conversion": round(conv, 0),
+                "gap": gap,
+            })
+    # الأسوأ تحويلاً أول (المنتج اللي بيتسأل عنه وما بيتباعش)
+    gap_products.sort(key=lambda x: (x["conversion"], -x["asked"]))
+
+    return {
+        "interested_no_order": interested_no_order,
+        "objections": objections,
+        "gap_products": gap_products[:8],
     }
 
 
@@ -185,6 +251,40 @@ def build_analytics_html(tenant, data):
         for o in data["recent_orders"]
     ) or "<p style='color:#475569;font-size:13px'>لا توجد طلبات بعد</p>"
 
+    # ── HTML الفرص الضايعة ──
+    lost = data["lost_opportunities"]
+    if lost["gap_products"]:
+        gap_rows = "".join(
+            f'<div class="bar-row">'
+            f'<div class="lbl" style="width:200px">{p["name"]}</div>'
+            f'<div style="flex:1;font-size:13px;color:#475569">'
+            f'سأل <b>{p["asked"]}</b> · اشترى <b style="color:#10b981">{p["bought"]}</b> · '
+            f'تحويل <b style="color:{"#10b981" if p["conversion"]>=30 else "#ef4444"}">{p["conversion"]:.0f}%</b>'
+            f'</div></div>'
+            for p in lost["gap_products"]
+        )
+    else:
+        gap_rows = "<p style='color:#475569;font-size:13px'>لسه مفيش بيانات كافية</p>"
+
+    lost_html = f"""
+    <div class="grid" style="margin-bottom:16px">
+      <div class="card" style="border:2px solid #ef4444">
+        <h2>مهتمين ما اشتروش</h2>
+        <div class="num red">{lost['interested_no_order']}</div>
+        <p style="font-size:12px;color:#94a3b8;margin:4px 0 0">عملاء وصلوا لمرحلة الاهتمام وما أكملوش</p>
+      </div>
+      <div class="card" style="border:2px solid #f97316">
+        <h2>اعترضوا على السعر</h2>
+        <div class="num" style="color:#f97316">{lost['objections']}</div>
+        <p style="font-size:12px;color:#94a3b8;margin:4px 0 0">قالوا غالي أو مش متأكد أو بعدين</p>
+      </div>
+    </div>
+    <div style="font-size:14px;font-weight:700;margin:16px 0 8px;color:#334155">
+      📉 المنتجات: سؤال مقابل شراء (الأكبر فجوة أول)
+    </div>
+    {gap_rows}
+    """
+
     return f"""<!DOCTYPE html><html dir="rtl" lang="ar">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{tenant.business_name} — Analytics</title><style>{_CSS}</style>
@@ -204,6 +304,11 @@ def build_analytics_html(tenant, data):
   <div class="card"><h2>شكاوى</h2><div class="num red">{data['complaints']}</div></div>
 </div>
 
+<div class="sec" style="border:2px solid #ef4444">
+  <h3>💸 الفرص الضايعة — فين بتخسر مبيعات</h3>
+  {lost_html}
+</div>
+
 <div class="sec"><h3>📬 Follow-up Stats</h3>
   <div class="grid">
     <div class="card"><h2>Follow-up #1 أُرسل</h2><div class="num yellow">{data['fu1_sent']}</div></div>
@@ -221,6 +326,7 @@ def build_analytics_html(tenant, data):
 <div class="sec"><h3>🏆 أكثر المنتجات طلبات (إجمالي)</h3>{_bars(data['orders_by_product'])}</div>
 <div class="sec"><h3>🔍 أكثر المنتجات استفساراً</h3>{_bars(data['product_inquiries'])}</div>
 <div class="sec"><h3>🧾 آخر الطلبات</h3>{orders_html}</div>
+
 
 <footer>آخر تحديث: {data['updated_at']} | يتجدد تلقائياً كل دقيقة</footer>
 </body></html>"""
