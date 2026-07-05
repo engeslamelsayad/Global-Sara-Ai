@@ -17,13 +17,20 @@ app = Flask(__name__)
 init_db(app)
 
 def safe_alter(conn, sql, label=None):
-    """ينفّذ SQL ويتجاهل خطأ لو العمود/الجدول موجود بالفعل"""
+    """
+    ينفّذ SQL في transaction منفصل ويتجاهل خطأ لو العمود/الجدول موجود.
+    مهم: كل أمر في transaction لوحده — عشان لو واحد فشل، مايكسرش الباقي.
+    (في PostgreSQL، فشل أمر جوه transaction بيوقف كل الأوامر اللي بعده)
+    """
     label = label or sql[:60]
+    trans = conn.begin()
     try:
         conn.execute(db.text(sql))
+        trans.commit()
         print(f"  ✅ {label}")
         return True
     except Exception as e:
+        trans.rollback()   # ← ده اللي بيصلّح مشكلة "transaction is aborted"
         err = str(e).lower()
         # خطأ "already exists" = عادي — يعني العمود موجود من قبل
         if any(kw in err for kw in ["already exists", "duplicate column", "duplicate"]):
@@ -103,7 +110,7 @@ def run():
         else:
             print("  ⏭  SQLite: meta_labels ستُنشأ بـ db.create_all() تلقائياً")
 
-        conn.commit()
+        # مفيش conn.commit() هنا — كل أمر بيعمل commit لوحده في safe_alter
         conn.close()
 
         print()
