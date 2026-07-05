@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}استيراد من رابط المتجر{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">استيراد المنتجات من متجرك 🔗</h1>
+  <p class="page-sub">حط رابط متجرك والـ AI هيستخرج كل المنتجات دفعة واحدة</p>
+</div>
+
+<div class="card" style="border:1px solid #DDD0F8; background:linear-gradient(135deg,#FBF9FF,#F4EEFF)">
+  <label>رابط المتجر أو صفحة المنتجات</label>
+  <input type="url" id="store-url" placeholder="https://your-store.com  أو  your-store.myshopify.com"
+         style="margin-bottom:12px">
+  <button class="btn-ai" onclick="scanStore()" id="scan-btn">🔍 امسح المتجر</button>
+  <p class="helper-text" style="margin-top:10px">
+    💡 بيدعم متاجر Shopify (استخراج دقيق) وأي موقع تاني (استخراج ذكي بالـ AI)
+  </p>
+</div>
+
+<div id="scan-status" style="display:none; text-align:center; padding:30px">
+  <div style="font-size:32px">⏳</div>
+  <p style="color:#6D28D9; font-weight:700; margin-top:10px">جاري مسح المتجر واستخراج المنتجات...</p>
+  <p style="color:#94a3b8; font-size:13px">ممكن ياخد لحد دقيقة حسب حجم المتجر</p>
+</div>
+
+<div id="results" style="display:none">
+  <div class="card" style="background:#F0FDF4; border:1px solid #86EFAC; margin-bottom:16px">
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px">
+      <div>
+        <strong id="result-count" style="color:#059669"></strong>
+        <span id="result-method" style="font-size:12px; color:#64748b; margin-right:8px"></span>
+      </div>
+      <div style="display:flex; gap:8px">
+        <button class="btn btn-secondary btn-sm" onclick="toggleAll(true)">تحديد الكل</button>
+        <button class="btn btn-secondary btn-sm" onclick="toggleAll(false)">إلغاء الكل</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="products-preview"></div>
+
+  <div style="position:sticky; bottom:0; background:#fff; padding:16px 0; border-top:1px solid #E2E8F0; margin-top:16px">
+    <button class="btn btn-primary" onclick="saveProducts()" id="save-btn" style="width:100%; padding:14px">
+      ✅ استورد المنتجات المختارة (<span id="selected-count">0</span>)
+    </button>
+  </div>
+</div>
+
+<div id="error-box" style="display:none; margin-top:16px" class="card">
+  <p style="color:#ef4444" id="error-msg"></p>
+</div>
+
+<script>
+let scanned = [];
+
+async function scanStore(){
+  const url = document.getElementById('store-url').value.trim();
+  if(!url){ alert('حط رابط المتجر أولاً'); return; }
+
+  document.getElementById('scan-status').style.display = 'block';
+  document.getElementById('results').style.display = 'none';
+  document.getElementById('error-box').style.display = 'none';
+  document.getElementById('scan-btn').disabled = true;
+
+  try {
+    const res = await fetch("{{ url_for('dashboard.products_import_scan') }}", {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({url})
+    });
+    const data = await res.json();
+    document.getElementById('scan-status').style.display = 'none';
+    document.getElementById('scan-btn').disabled = false;
+
+    if(data.error){
+      document.getElementById('error-box').style.display = 'block';
+      document.getElementById('error-msg').textContent = '❌ ' + data.error;
+      return;
+    }
+
+    scanned = data.products;
+    renderPreview(data);
+  } catch(e){
+    document.getElementById('scan-status').style.display = 'none';
+    document.getElementById('scan-btn').disabled = false;
+    document.getElementById('error-box').style.display = 'block';
+    document.getElementById('error-msg').textContent = '❌ حصل خطأ، حاول تاني';
+  }
+}
+
+function renderPreview(data){
+  document.getElementById('results').style.display = 'block';
+  document.getElementById('result-count').textContent = `لقينا ${data.count} منتج`;
+  const methodLabel = data.method === 'shopify' ? '(Shopify — دقيق)' : '(استخراج ذكي بالـ AI)';
+  document.getElementById('result-method').textContent = methodLabel;
+
+  const box = document.getElementById('products-preview');
+  box.innerHTML = scanned.map((p, i) => `
+    <div class="card" style="margin-bottom:10px; display:flex; gap:12px; align-items:start">
+      <input type="checkbox" class="prod-check" data-idx="${i}" checked
+             onchange="updateCount()" style="width:20px; height:20px; margin-top:4px; cursor:pointer">
+      <div style="flex:1">
+        <input type="text" value="${escapeHtml(p.name)}" onchange="scanned[${i}].name=this.value"
+               style="font-weight:700; border:none; border-bottom:1px solid #E2E8F0; padding:4px 0; width:100%; margin-bottom:6px">
+        <div style="font-size:13px; color:#64748b; margin-bottom:6px">${escapeHtml(p.description || 'لا يوجد وصف') }</div>
+        <div style="display:flex; gap:12px; font-size:13px; flex-wrap:wrap">
+          <span>💰 <input type="text" value="${p.price_note || (p.price_amount ? p.price_amount+' ج' : '')}"
+                onchange="scanned[${i}].price_note=this.value"
+                style="border:1px solid #E2E8F0; border-radius:6px; padding:2px 8px; width:100px"></span>
+          <span style="color:#94a3b8">🔑 ${escapeHtml(p.keywords || '')}</span>
+        </div>
+      </div>
+    </div>
+  `).join('');
+  updateCount();
+}
+
+function updateCount(){
+  const n = document.querySelectorAll('.prod-check:checked').length;
+  document.getElementById('selected-count').textContent = n;
+}
+
+function toggleAll(state){
+  document.querySelectorAll('.prod-check').forEach(c => c.checked = state);
+  updateCount();
+}
+
+async function saveProducts(){
+  const selected = [];
+  document.querySelectorAll('.prod-check:checked').forEach(c => {
+    selected.push(scanned[parseInt(c.dataset.idx)]);
+  });
+  if(!selected.length){ alert('اختر منتج واحد على الأقل'); return; }
+
+  const btn = document.getElementById('save-btn');
+  btn.disabled = true; btn.textContent = '⏳ جاري الاستيراد...';
+
+  try {
+    const res = await fetch("{{ url_for('dashboard.products_import_save') }}", {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({products: selected})
+    });
+    const data = await res.json();
+    if(data.error){ alert(data.error); btn.disabled=false; return; }
+    alert(`✅ تم استيراد ${data.added} منتج بنجاح!` + (data.skipped ? `\n(${data.skipped} اتخطّى لأنه موجود بالفعل)` : ''));
+    window.location.href = "{{ url_for('dashboard.products_list') }}";
+  } catch(e){
+    alert('حصل خطأ، حاول تاني');
+    btn.disabled = false; btn.textContent = '✅ استورد المنتجات المختارة';
+  }
+}
+
+function escapeHtml(s){
+  return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
+{% endblock %}

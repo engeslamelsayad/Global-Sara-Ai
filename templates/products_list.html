@@ -6,7 +6,10 @@
     <h1 class="page-title">المنتجات</h1>
     <p class="page-sub">كل منتج هنا هو اللي البوت بيعرضه ويبيعه لعملائك</p>
   </div>
-  <a class="btn btn-primary" href="{{ url_for('dashboard.product_new') }}">+ منتج جديد</a>
+  <div style="display:flex; gap:8px">
+    <a class="btn-ai" href="{{ url_for('dashboard.products_import') }}">🔗 استيراد من رابط المتجر</a>
+    <a class="btn btn-primary" href="{{ url_for('dashboard.product_new') }}">+ منتج جديد</a>
+  </div>
 </div>
 
 <div class="card" style="padding:0; overflow:hidden">

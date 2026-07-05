@@ -79,6 +79,100 @@ def products_list():
     return render_template("products_list.html", tenant=tenant, products=products)
 
 
+# =====================================================================
+# STORE IMPORT — استيراد المنتجات من رابط المتجر (حل هجين)
+# =====================================================================
+@dashboard_bp.route("/products/import")
+@login_required_dashboard
+def products_import():
+    tenant = _current_tenant()
+    return render_template("products_import.html", tenant=tenant)
+
+
+@dashboard_bp.route("/products/import/scan", methods=["POST"])
+@login_required_dashboard
+def products_import_scan():
+    """يمسح رابط المتجر ويرجّع المنتجات المكتشفة للمعاينة"""
+    import store_importer
+    tenant = _current_tenant()
+    url = (request.json.get("url") or "").strip()
+    if not url:
+        return jsonify({"error": "الرابط فارغ"}), 400
+
+    bc = tenant.bot_config
+    dialect = bc.dialect if bc else "مصري"
+    result = store_importer.import_store(url, dialect=dialect)
+
+    if result["error"]:
+        return jsonify({"error": result["error"]}), 400
+
+    return jsonify({
+        "method": result["method"],
+        "products": result["products"],
+        "count": len(result["products"]),
+    })
+
+
+@dashboard_bp.route("/products/import/save", methods=["POST"])
+@login_required_dashboard
+def products_import_save():
+    """يستورد المنتجات المختارة فعلياً للداتابيز"""
+    import re as _re
+    tenant = _current_tenant()
+    selected = request.json.get("products", [])
+    if not selected:
+        return jsonify({"error": "لم يتم اختيار أي منتج"}), 400
+
+    # المفاتيح الموجودة عشان منكررش
+    existing_keys = {p.product_key for p in Product.query.filter_by(tenant_id=tenant.id).all()}
+    existing_names = {p.name.strip().lower() for p in Product.query.filter_by(tenant_id=tenant.id).all()}
+
+    added, skipped = 0, 0
+    for item in selected:
+        name = (item.get("name") or "").strip()
+        if not name or name.lower() in existing_names:
+            skipped += 1
+            continue
+
+        # نولّد product_key فريد من الاسم
+        base_key = _re.sub(r"[^a-z0-9]+", "_", name.lower())[:30].strip("_")
+        if not base_key or len(base_key) < 2:
+            # الاسم عربي خالص أو قصير — نستخدم رقم تسلسلي
+            base_key = f"prod_{len(existing_keys) + 1}"
+        key = base_key
+        n = 1
+        while key in existing_keys:
+            key = f"{base_key}_{n}"
+            n += 1
+        existing_keys.add(key)
+
+        price = item.get("price_amount")
+        try:
+            price = float(price) if price else None
+        except (ValueError, TypeError):
+            price = None
+
+        product = Product(
+            tenant_id=tenant.id,
+            product_key=key,
+            name=name,
+            description=(item.get("description") or "").strip(),
+            keywords=(item.get("keywords") or "").strip(),
+            price_type="single",
+            price_amount=price,
+            shipping_fee=0,
+            price_note=(item.get("price_note") or "").strip(),
+            product_link=(item.get("product_link") or "").strip(),
+            image_urls=(item.get("image_urls") or "").strip(),
+        )
+        db.session.add(product)
+        added += 1
+
+    db.session.commit()
+    _invalidate(tenant)
+    return jsonify({"added": added, "skipped": skipped})
+
+
 @dashboard_bp.route("/products/new", methods=["GET", "POST"])
 @login_required_dashboard
 def product_new():
