@@ -19,7 +19,12 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 EXTRACT_MODEL = "claude-haiku-4-5-20251001"
 
-HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; StoreImporter/1.0)"}
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ar,en;q=0.9",
+}
 
 
 # =====================================================================
@@ -28,9 +33,7 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; StoreImporter/1.0)"}
 def import_store(url, dialect="مصري", max_products=30):
     """
     يستورد المنتجات من رابط متجر.
-    بيرجع dict: {"method": "shopify"|"scrape", "products": [...], "error": ...}
-    كل منتج: {name, description, keywords, price_amount, price_note,
-              features, product_link, image_urls}
+    بيرجع dict: {"method": "shopify"|"easyorders"|"scrape", "products": [...], "error": ...}
     """
     url = url.strip()
     if not url.startswith(("http://", "https://")):
@@ -41,12 +44,90 @@ def import_store(url, dialect="مصري", max_products=30):
     if shopify_result is not None:
         return {"method": "shopify", "products": shopify_result, "error": None}
 
-    # 2) fallback: scraping ذكي
+    # 2) جرّب EasyOrders (منصة مصرية شائعة)
+    eo_result = _try_easyorders(url, max_products)
+    if eo_result is not None:
+        return {"method": "easyorders", "products": eo_result, "error": None}
+
+    # 3) fallback: scraping ذكي
     scrape_result, err = _try_scrape(url, dialect, max_products)
     if scrape_result:
         return {"method": "scrape", "products": scrape_result, "error": None}
 
     return {"method": None, "products": [], "error": err or "تعذّر استخراج المنتجات من الرابط"}
+
+
+def _try_easyorders(url, max_products):
+    """
+    يحاول جلب منتجات EasyOrders عبر الـ storefront API.
+    منصة EasyOrders بتحمّل المنتجات بالـ JavaScript من api.easy-orders.net
+    بيرجع list لو نجح، None لو مش EasyOrders.
+    """
+    m = re.match(r"(https?://)([^/]+)", url)
+    if not m:
+        return None
+    domain = m.group(2)
+
+    # EasyOrders بتستخدم الـ full-website-data endpoint للـ storefront
+    endpoints = [
+        f"https://api.easy-orders.net/api/v1/external-app/full-website-data",
+        f"https://{domain}/api/v1/full-website-data",
+    ]
+
+    for endpoint in endpoints:
+        try:
+            headers = dict(HEADERS)
+            headers["subdomain"] = domain          # EasyOrders بيحدد المتجر بالـ subdomain header
+            headers["Origin"] = f"https://{domain}"
+            resp = requests.get(endpoint, headers=headers, timeout=15)
+            if resp.status_code != 200:
+                continue
+            data = resp.json()
+        except Exception:
+            continue
+
+        # نستخرج المنتجات من بنية EasyOrders
+        raw_products = data.get("products") or data.get("data", {}).get("products") or []
+        if not raw_products:
+            continue
+
+        products = []
+        for p in raw_products[:max_products]:
+            price = p.get("price") or p.get("sale_price")
+            try:
+                price = float(price) if price else None
+            except (ValueError, TypeError):
+                price = None
+
+            desc = re.sub(r"<[^>]+>", " ", p.get("description", "") or "")
+            desc = re.sub(r"\s+", " ", desc).strip()[:300]
+
+            slug = p.get("slug", "") or p.get("id", "")
+            images = []
+            if p.get("thumb"):
+                images.append(p["thumb"])
+            for img in (p.get("images") or []):
+                src = img if isinstance(img, str) else img.get("url", "")
+                if src:
+                    images.append(src)
+
+            name = p.get("name", "").strip()
+            if not name:
+                continue
+            products.append({
+                "name": name,
+                "description": desc,
+                "keywords": _make_keywords(name, ""),
+                "price_amount": price,
+                "price_note": f"{price:.0f} ج" if price else "",
+                "features": "",
+                "product_link": f"https://{domain}/products/{slug}" if slug else f"https://{domain}",
+                "image_urls": ",".join(images[:3]),
+            })
+
+        return products if products else None
+
+    return None
 
 
 # =====================================================================
@@ -145,7 +226,13 @@ def _try_scrape(url, dialect, max_products):
         resp.raise_for_status()
         html = resp.text
     except Exception as e:
-        return None, f"تعذّر جلب الصفحة: {str(e)[:80]}"
+        err_str = str(e)
+        if "403" in err_str or "Forbidden" in err_str:
+            return None, (
+                "الموقع ده بيحجب الاستخراج التلقائي 🔒 "
+                "الحل: استخدم رابط منتج واحد مباشر، أو أضف المنتجات يدوياً من زر «منتج جديد»."
+            )
+        return None, f"تعذّر جلب الصفحة: {err_str[:80]}"
 
     # نستخرج روابط المنتجات المحتملة (patterns شائعة)
     product_links = _extract_product_links(html, url)
@@ -155,6 +242,16 @@ def _try_scrape(url, dialect, max_products):
     text = re.sub(r"<script[^>]*>.*?</script>", " ", text, flags=re.DOTALL)
     text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"\s+", " ", text).strip()[:6000]
+
+    # نكتشف لو الصفحة JavaScript-based (منتجات بتتحمّل ديناميكياً)
+    loading_count = html.count("Loading") + html.count("جاري التحميل")
+    meaningful_len = len(re.sub(r"\s+", "", text))
+    if loading_count >= 5 and meaningful_len < 600:
+        return None, (
+            "الموقع ده بيحمّل منتجاته بطريقة ديناميكية (JavaScript) — صعب نقراها تلقائياً. "
+            "الحل: استخدم رابط منتج واحد مباشر (من صفحة المنتج نفسه)، "
+            "أو أضف المنتجات يدوياً من زر «منتج جديد»."
+        )
 
     # نستخدم الـ AI لاستخراج المنتجات من النص
     prompt = f"""أنت محلل متاجر إلكترونية. ده محتوى نصي من صفحة متجر:
