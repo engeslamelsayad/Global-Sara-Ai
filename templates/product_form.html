@@ -52,7 +52,7 @@
   <input type="text" name="name" id="f-name" required value="{{ product.name if product else '' }}">
 
   <label>مفتاح المنتج (بالإنجليزي بدون مسافات) * <span class="hint">مثال: eczema_cream</span></label>
-  <input type="text" name="product_key" value="{{ product.product_key if product else '' }}" required>
+  <input type="text" name="product_key" id="f-product-key" value="{{ product.product_key if product else '' }}" required>
 
   <label>الوصف العام <span class="hint">ده اللي البوت بيشرحه للعميل</span></label>
   <textarea name="description" id="f-description">{{ product.description if product else '' }}</textarea>
@@ -151,6 +151,7 @@ function switchTab(tab){
 function applyAll(data){
   /* يملأ كل الحقول دفعة واحدة */
   if(data.suggested_name)        applyField('f-name', data.suggested_name);
+  if(data.suggested_product_key) applyField('f-product-key', data.suggested_product_key);
   if(data.suggested_description) applyField('f-description', data.suggested_description);
   if(data.suggested_keywords)    applyField('f-keywords', data.suggested_keywords);
   if(data.features_text)         applyField('f-features', data.features_text);
@@ -173,6 +174,7 @@ function renderResult(data){
       </button>
     </div>
     ${data.suggested_name ? `<div class="ai-suggestion-item"><div class="label">الاسم</div>${data.suggested_name} <span class="ai-apply-btn" onclick="applyField('f-name',\`${data.suggested_name}\`)">تطبيق ←</span></div>` : ''}
+    ${data.suggested_product_key ? `<div class="ai-suggestion-item"><div class="label">مفتاح المنتج</div><code>${data.suggested_product_key}</code> <span class="ai-apply-btn" onclick="applyField('f-product-key',\`${data.suggested_product_key}\`)">تطبيق ←</span></div>` : ''}
     ${data.suggested_description ? `<div class="ai-suggestion-item"><div class="label">الوصف</div>${data.suggested_description} <span class="ai-apply-btn" onclick="applyField('f-description',\`${data.suggested_description}\`)">تطبيق ←</span></div>` : ''}
     ${data.suggested_keywords ? `<div class="ai-suggestion-item"><div class="label">كلمات البحث</div>${data.suggested_keywords} <span class="ai-apply-btn" onclick="applyField('f-keywords',\`${data.suggested_keywords}\`)">تطبيق ←</span></div>` : ''}
     ${data.features_text ? `<div class="ai-suggestion-item"><div class="label">المميزات</div><pre style="margin:4px 0;font-family:inherit;font-size:12px">${data.features_text}</pre><span class="ai-apply-btn" onclick="applyField('f-features',\`${data.features_text}\`)">تطبيق ←</span></div>` : ''}

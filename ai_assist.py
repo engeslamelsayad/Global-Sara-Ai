@@ -92,19 +92,43 @@ def suggest_objection_responses(business_description, sample_product_name="", di
 def suggest_product_details(short_input, business_description="", dialect="مصري"):
     """
     مدخل: "كريم للحبوب فيه شي بتر وزيت شاي"
-    مخرج: اسم محسّن + وصف بيعي + كلمات مفتاحية للبحث (RAG)
+    مخرج: كل بيانات المنتج (نفس صيغة suggest_product_from_url) — اسم، وصف،
+          كلمات مفتاحية، مفتاح المنتج، مميزات، من يستفيد، متى تظهر النتيجة،
+          نص إغلاق، FAQ
     """
     prompt = f"""بزنس صاحبه وصفه: "{business_description or "غير محدد"}"
 مالك البزنس كتب عن منتج كده (نص خام بسيط):
 "{short_input}"
 
-حوّل هذا لبيانات منتج احترافية. رد بصيغة JSON بالضبط بهذا الشكل:
+حوّل هذا لبيانات منتج احترافية كاملة. رد بصيغة JSON بالضبط بهذا الشكل:
 {{
   "suggested_name": "اسم تسويقي جذاب للمنتج بلهجة {dialect}",
+  "suggested_product_key": "مفتاح إنجليزي قصير بحروف صغيرة بدون مسافات (استخدم _ بين الكلمات، مثال: eczema_cream أو sleep_spray) — يعبّر عن المنتج",
   "suggested_description": "وصف بيعي مقنع في جملتين أو ثلاثة، يبرز الفايدة الأساسية",
-  "suggested_keywords": "كلمة1,كلمة2,كلمة3,كلمة4 (كلمات يستخدمها العملاء فعلياً للسؤال عن المشكلة دي، مفصولة بفاصلة بدون مسافات)"
+  "suggested_keywords": "كلمة1,كلمة2,كلمة3,كلمة4 (كلمات يستخدمها العملاء فعلياً للسؤال عن المشكلة دي، مفصولة بفاصلة بدون مسافات)",
+  "features": ["ميزة 1", "ميزة 2", "ميزة 3"],
+  "who_benefits": "من يستفيد من هذا المنتج (وصف الجمهور المستهدف)",
+  "results_timeline": "متى تظهر النتيجة بعد الاستخدام",
+  "closing_pitch": "جملة إقناع قوية لإغلاق البيع لما العميل مش متأكد",
+  "faq_pairs": [
+    {{"q": "سؤال شائع 1", "a": "جواب مقنع 1"}},
+    {{"q": "سؤال شائع 2", "a": "جواب مقنع 2"}}
+  ]
 }}"""
-    return _ask_json(prompt)
+    result = _ask_json(prompt, max_tokens=1200)
+
+    # حوّل faq_pairs لـ text بسيط للـ textarea
+    if "faq_pairs" in result and isinstance(result["faq_pairs"], list):
+        result["faq_text"] = "\n".join(
+            f"س: {item.get('q','')}\nج: {item.get('a','')}"
+            for item in result["faq_pairs"]
+        )
+
+    # حوّل features list لـ text بسيط
+    if "features" in result and isinstance(result["features"], list):
+        result["features_text"] = "\n".join(result["features"])
+
+    return result
 
 
 # =====================================================================
@@ -201,6 +225,7 @@ def suggest_product_from_url(url, business_description="", dialect="مصري"):
 استخرج بيانات المنتج من هذا النص بدقة. رد بصيغة JSON فقط:
 {{
   "suggested_name": "اسم تسويقي جذاب للمنتج",
+  "suggested_product_key": "مفتاح إنجليزي قصير بحروف صغيرة بدون مسافات (استخدم _ بين الكلمات، مثال: eczema_cream) — يعبّر عن المنتج",
   "suggested_description": "وصف بيعي مقنع في 2-3 جمل يبرز الفايدة الأساسية",
   "suggested_keywords": "كلمة1,كلمة2,كلمة3,كلمة4,كلمة5 (كلمات يستخدمها العملاء للسؤال عن المشكلة)",
   "features": ["ميزة 1", "ميزة 2", "ميزة 3"],
