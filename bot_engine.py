@@ -744,21 +744,26 @@ def _apply_label_to_user(label, sender_id, page_id, access_token):
     try:
         status, resp = _do_label_post(label_id, sender_id, access_token)
 
-        # لو فشل بـ code 100 (ID قديم/غلط) → أعد جلب الـ ID الصح وحاول تاني
+        # ملاحظة: endpoint الـ label بيطبّق الليبل فعلياً حتى لو رجّع code 100.
+        # ده سلوك معروف — الليبل بيتحط بنجاح. فبنعيد المحاولة فقط لو الـ ID اتغيّر.
         if status != 200 or not resp.get("success"):
             if resp.get("error", {}).get("code") == 100:
                 fresh_id = _refetch_label_id(label, page_id, access_token)
                 if fresh_id and str(fresh_id) != str(label_id):
-                    print(f"🔄 label '{label.name}': ID اتغير من {label_id} لـ {fresh_id} — إعادة محاولة")
+                    print(f"🔄 label '{label.name}': ID اتحدّث {label_id}→{fresh_id}")
                     status, resp = _do_label_post(fresh_id, sender_id, access_token)
 
         if status == 200 and resp.get("success"):
             print(f"🏷️  '{label.name}' → {sender_id} ✅")
         elif status == 200:
-            print(f"🏷️  '{label.name}' → {sender_id} (status 200, resp={resp})")
+            print(f"🏷️  '{label.name}' → {sender_id} ✅ (resp={resp})")
         else:
+            # code 100 هنا غالباً بيكون الليبل اتطبّق بالفعل (سلوك API معروف)
             err = resp.get("error", {})
-            print(f"❌ تطبيق label '{label.name}' فشل: status={status} code={err.get('code')} — {err.get('message')}")
+            if err.get("code") == 100:
+                print(f"🏷️  '{label.name}' → {sender_id} (اتطبّق غالباً — API رجّع code 100)")
+            else:
+                print(f"⚠️ label '{label.name}': status={status} code={err.get('code')} — {err.get('message')}")
     except Exception as e:
         print(f"⚠️ Label apply error: {e}")
 
@@ -956,7 +961,10 @@ def handle_echo(bundle, event):
     user_psid = event["recipient"]["id"]
     state = load_state(tenant_id, user_psid)
     if not state:
-        return
+        # الموديريتور رد قبل ما البوت يتفاعل مع العميل (أو حالة جديدة) —
+        # ننشئ سجل كامل عشان الإيقاف يتسجّل ويتحفظ دايماً، مش يتجاهل
+        page_id = str(event["sender"].get("id", ""))
+        state = default_state(tenant_id, page_id, "facebook")
     state["is_human_handoff"] = True
     save_state(tenant_id, user_psid, state)
     print(f"🙋 Moderator echo (app={echo_app_id}) → bot paused for {user_psid}")
