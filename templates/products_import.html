@@ -3,18 +3,57 @@
 {% block content %}
 <div class="page-header">
   <h1 class="page-title">استيراد المنتجات من متجرك 🔗</h1>
-  <p class="page-sub">حط رابط متجرك والـ AI هيستخرج كل المنتجات دفعة واحدة</p>
+  <p class="page-sub">اختر طريقة الاستيراد المناسبة لمتجرك</p>
 </div>
 
-<div class="card" style="border:1px solid #DDD0F8; background:linear-gradient(135deg,#FBF9FF,#F4EEFF)">
-  <label>رابط المتجر أو صفحة المنتجات</label>
-  <input type="url" id="store-url" placeholder="https://your-store.com  أو  your-store.myshopify.com"
-         style="margin-bottom:12px">
-  <button class="btn-ai" onclick="scanStore()" id="scan-btn">🔍 امسح المتجر</button>
-  <p class="helper-text" style="margin-top:10px">
-    💡 بيدعم متاجر Shopify (استخراج دقيق) وأي موقع تاني (استخراج ذكي بالـ AI)
-  </p>
+<!-- تبويبات طريقة الاستيراد -->
+<div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap">
+  <button class="import-tab active" data-tab="url" onclick="switchTab('url')">🔗 رابط المتجر</button>
+  <button class="import-tab" data-tab="easyorders" onclick="switchTab('easyorders')">🟢 EasyOrders (API)</button>
 </div>
+
+<!-- تبويب رابط المتجر -->
+<div id="tab-url" class="import-panel">
+  <div class="card" style="border:1px solid #DDD0F8; background:linear-gradient(135deg,#FBF9FF,#F4EEFF)">
+    <label>رابط المتجر أو صفحة المنتجات</label>
+    <input type="url" id="store-url" placeholder="https://your-store.com  أو  your-store.myshopify.com"
+           style="margin-bottom:12px">
+    <button class="btn-ai" onclick="scanStore()" id="scan-btn">🔍 امسح المتجر</button>
+    <p class="helper-text" style="margin-top:10px">
+      💡 بيدعم متاجر Shopify (استخراج دقيق) وأي موقع HTML عادي (استخراج ذكي بالـ AI)
+    </p>
+  </div>
+</div>
+
+<!-- تبويب EasyOrders API -->
+<div id="tab-easyorders" class="import-panel" style="display:none">
+  <div class="card" style="border:1px solid #86EFAC; background:linear-gradient(135deg,#F0FDF4,#DCFCE7)">
+    <label>مفتاح EasyOrders API</label>
+    <input type="text" id="eo-api-key" placeholder="الصق مفتاح الـ API هنا"
+           style="margin-bottom:12px; font-family:monospace">
+    <button class="btn-ai" onclick="scanEasyOrders()" id="eo-scan-btn"
+            style="background:linear-gradient(135deg,#10b981,#059669)">🟢 استورد من EasyOrders</button>
+
+    <div style="background:#fff; border-radius:10px; padding:14px; margin-top:14px; font-size:13px; line-height:1.9">
+      <strong style="color:#059669">📋 إزاي تجيب المفتاح؟</strong>
+      <div style="margin-top:8px; color:#475569">
+        1. ادخل حساب EasyOrders بتاعك<br>
+        2. روح <b>الإعدادات → Public API</b><br>
+        3. اضغط <b>Create New API Key</b> واختار صلاحية <b>products:read</b><br>
+        4. انسخ المفتاح والصقه فوق
+      </div>
+    </div>
+    <p class="helper-text" style="margin-top:10px">
+      ✅ ده الحل المضمون لمتاجر EasyOrders — بيجيب كل المنتجات بدقة كاملة
+    </p>
+  </div>
+</div>
+
+<style>
+.import-tab { padding:10px 18px; border:2px solid #E2E8F0; background:#fff; border-radius:10px;
+  font-weight:700; cursor:pointer; font-size:14px; color:#64748b; transition:all .15s }
+.import-tab.active { border-color:#6D28D9; color:#6D28D9; background:#F4EEFF }
+</style>
 
 <div id="scan-status" style="display:none; text-align:center; padding:30px">
   <div style="font-size:32px">⏳</div>
@@ -51,6 +90,49 @@
 
 <script>
 let scanned = [];
+
+function switchTab(tab){
+  document.querySelectorAll('.import-tab').forEach(t =>
+    t.classList.toggle('active', t.dataset.tab === tab));
+  document.querySelectorAll('.import-panel').forEach(p => p.style.display = 'none');
+  document.getElementById('tab-' + tab).style.display = 'block';
+  // نخفي النتائج القديمة عند تبديل التبويب
+  document.getElementById('results').style.display = 'none';
+  document.getElementById('error-box').style.display = 'none';
+}
+
+async function scanEasyOrders(){
+  const apiKey = document.getElementById('eo-api-key').value.trim();
+  if(!apiKey){ alert('الصق مفتاح الـ API أولاً'); return; }
+
+  document.getElementById('scan-status').style.display = 'block';
+  document.getElementById('results').style.display = 'none';
+  document.getElementById('error-box').style.display = 'none';
+  document.getElementById('eo-scan-btn').disabled = true;
+
+  try {
+    const res = await fetch("{{ url_for('dashboard.products_import_easyorders') }}", {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({api_key: apiKey})
+    });
+    const data = await res.json();
+    document.getElementById('scan-status').style.display = 'none';
+    document.getElementById('eo-scan-btn').disabled = false;
+
+    if(data.error){
+      document.getElementById('error-box').style.display = 'block';
+      document.getElementById('error-msg').textContent = '❌ ' + data.error;
+      return;
+    }
+    scanned = data.products;
+    renderPreview(data);
+  } catch(e){
+    document.getElementById('scan-status').style.display = 'none';
+    document.getElementById('eo-scan-btn').disabled = false;
+    document.getElementById('error-box').style.display = 'block';
+    document.getElementById('error-msg').textContent = '❌ حصل خطأ، حاول تاني';
+  }
+}
 
 async function scanStore(){
   const url = document.getElementById('store-url').value.trim();
@@ -89,7 +171,13 @@ async function scanStore(){
 function renderPreview(data){
   document.getElementById('results').style.display = 'block';
   document.getElementById('result-count').textContent = `لقينا ${data.count} منتج`;
-  const methodLabel = data.method === 'shopify' ? '(Shopify — دقيق)' : '(استخراج ذكي بالـ AI)';
+  const labels = {
+    'shopify': '(Shopify — دقيق)',
+    'easyorders_api': '(EasyOrders API — دقيق ✅)',
+    'easyorders': '(EasyOrders)',
+    'scrape': '(استخراج ذكي بالـ AI)'
+  };
+  const methodLabel = labels[data.method] || '(استخراج ذكي بالـ AI)';
   document.getElementById('result-method').textContent = methodLabel;
 
   const box = document.getElementById('products-preview');

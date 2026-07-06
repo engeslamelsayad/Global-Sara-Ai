@@ -30,6 +30,95 @@ HEADERS = {
 # =====================================================================
 # نقطة الدخول الرئيسية
 # =====================================================================
+def import_from_easyorders_api(api_key, max_products=100):
+    """
+    استيراد المنتجات من EasyOrders عبر الـ API الرسمي (بالـ API Key).
+    ده الحل المضمون لمتاجر EasyOrders — بيجيب كل المنتجات بدقة.
+
+    التاجر بياخد الـ API Key من:
+    حساب EasyOrders → Public API → Create New API Key (بصلاحية products:read)
+
+    بيرجع dict: {"products": [...], "error": ...}
+    """
+    api_key = (api_key or "").strip()
+    if not api_key:
+        return {"products": [], "error": "مفتاح الـ API فارغ"}
+
+    endpoint = "https://api.easy-orders.net/api/v1/external-apps/products"
+    try:
+        resp = requests.get(
+            endpoint,
+            headers={"Api-Key": api_key, "Content-Type": "application/json"},
+            timeout=25,
+        )
+    except Exception as e:
+        return {"products": [], "error": f"تعذّر الاتصال بـ EasyOrders: {str(e)[:80]}"}
+
+    if resp.status_code == 401 or resp.status_code == 403:
+        return {"products": [], "error": "مفتاح الـ API غير صحيح أو مالوش صلاحية قراءة المنتجات (products:read)"}
+    if resp.status_code != 200:
+        return {"products": [], "error": f"EasyOrders رجّع خطأ (كود {resp.status_code})"}
+
+    try:
+        data = resp.json()
+    except Exception:
+        return {"products": [], "error": "رد EasyOrders مش صالح"}
+
+    # الرد ممكن يكون list مباشرة أو جوه data/products
+    raw = data if isinstance(data, list) else (
+        data.get("data") or data.get("products") or []
+    )
+    if not raw:
+        return {"products": [], "error": "مفيش منتجات في المتجر"}
+
+    products = []
+    for p in raw[:max_products]:
+        name = (p.get("name") or "").strip()
+        if not name:
+            continue
+
+        # السعر: نفضّل sale_price لو موجود وأقل، وإلا price الأصلي
+        price = p.get("sale_price") or p.get("price")
+        try:
+            price = float(price) if price else None
+        except (ValueError, TypeError):
+            price = None
+
+        # الوصف: تنظيف HTML
+        desc = re.sub(r"<[^>]+>", " ", p.get("description", "") or "")
+        desc = re.sub(r"\s+", " ", desc).strip()[:300]
+
+        # الصور
+        images = []
+        if p.get("thumb"):
+            images.append(p["thumb"])
+        for img in (p.get("images") or []):
+            if isinstance(img, str) and img:
+                images.append(img)
+
+        # الشحن المجاني
+        is_free = p.get("is_free_shipping", False)
+        price_note = ""
+        if price:
+            price_note = f"{price:.0f} ج" + (" شامل الشحن" if is_free else "")
+
+        slug = p.get("slug", "")
+        products.append({
+            "name": name,
+            "description": desc,
+            "keywords": _make_keywords(name, ""),
+            "price_amount": price,
+            "price_note": price_note,
+            "features": "",
+            "product_link": "",   # الـ API مابيرجعش رابط الصفحة مباشرة
+            "image_urls": ",".join(images[:3]),
+            "is_free_shipping": is_free,
+            "easyorders_slug": slug,
+        })
+
+    return {"products": products, "error": None}
+
+
 def import_store(url, dialect="مصري", max_products=30):
     """
     يستورد المنتجات من رابط متجر.

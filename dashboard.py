@@ -113,6 +113,26 @@ def products_import_scan():
     })
 
 
+@dashboard_bp.route("/products/import/easyorders", methods=["POST"])
+@login_required_dashboard
+def products_import_easyorders():
+    """يستورد المنتجات من EasyOrders عبر الـ API Key الرسمي"""
+    import store_importer
+    api_key = (request.json.get("api_key") or "").strip()
+    if not api_key:
+        return jsonify({"error": "مفتاح الـ API فارغ"}), 400
+
+    result = store_importer.import_from_easyorders_api(api_key)
+    if result["error"]:
+        return jsonify({"error": result["error"]}), 400
+
+    return jsonify({
+        "method": "easyorders_api",
+        "products": result["products"],
+        "count": len(result["products"]),
+    })
+
+
 @dashboard_bp.route("/products/import/save", methods=["POST"])
 @login_required_dashboard
 def products_import_save():
