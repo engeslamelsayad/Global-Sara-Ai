@@ -31,15 +31,33 @@ HEADERS = {
 # نقطة الدخول الرئيسية
 # =====================================================================
 def _fetch_easyorders_page(api_key, page, limit=100):
-    """يجيب صفحة واحدة من منتجات EasyOrders — بيرجع (list, error)"""
+    """
+    يجيب صفحة واحدة من منتجات EasyOrders — بيرجع (list, error)
+
+    مهم: endpoint القائمة بيرجّع حقول مختصرة افتراضياً (price بس، من غير
+    sale_price ولا description). لازم نطلب الحقول صراحةً بـ fields=
+    (مؤكد من التشخيص في الإنتاج: keys=['price'] فقط بدون fields)
+    """
     endpoint = "https://api.easy-orders.net/api/v1/external-apps/products"
-    try:
-        resp = requests.get(
+    wanted_fields = ("id,name,price,sale_price,description,slug,sku,"
+                     "thumb,images,is_free_shipping,quantity")
+
+    def _do_request(with_fields):
+        params = {"page": page, "limit": limit}
+        if with_fields:
+            params["fields"] = wanted_fields
+        return requests.get(
             endpoint,
-            params={"page": page, "limit": limit},
+            params=params,
             headers={"Api-Key": api_key, "Content-Type": "application/json"},
             timeout=25,
         )
+
+    try:
+        resp = _do_request(with_fields=True)
+        # لو الـ fields param مش مدعوم ورجّع خطأ → جرّب من غيره
+        if resp.status_code == 400:
+            resp = _do_request(with_fields=False)
     except Exception as e:
         return None, f"تعذّر الاتصال بـ EasyOrders: {str(e)[:80]}"
 
@@ -151,13 +169,13 @@ def import_from_easyorders_api(api_key, max_products=500):
     if not all_raw:
         return {"products": [], "error": "مفيش منتجات في المتجر"}
 
-    # ── تشخيص: نطبع حقول السعر من أول منتج في اللوج ──
-    # لو السعر طلع غلط، اللوج ده هيوضح شكل البيانات الحقيقية فوراً
+    # ── تشخيص: نطبع حقول أول منتج في اللوج ──
+    # لو السعر/الوصف طلع ناقص، اللوج ده هيوضح شكل البيانات الحقيقية فوراً
     first = all_raw[0]
-    print(f"🔍 EasyOrders price fields sample [{first.get('name','?')[:30]}]: "
+    print(f"🔍 EasyOrders sample [{first.get('name','?')[:30]}]: "
           f"price={first.get('price')!r} sale_price={first.get('sale_price')!r} "
-          f"variants={len(first.get('variants') or [])} "
-          f"keys={[k for k in first.keys() if 'price' in k.lower() or 'sale' in k.lower()]}")
+          f"desc_len={len(first.get('description') or '')} "
+          f"all_keys={sorted(first.keys())}")
 
     products = []
     for p in all_raw[:max_products]:
