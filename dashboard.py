@@ -293,6 +293,18 @@ def product_edit(product_id):
     tenant = _current_tenant()
     product = Product.query.filter_by(id=product_id, tenant_id=tenant.id).first_or_404()
 
+    # ── شفاء تلقائي: نمسح نص "None" اللي اتسجّل غلط من bug عرض قديم ──
+    _none_fields = ("description", "who_benefits", "results_timeline",
+                    "closing_pitch", "cross_selling", "sensitive_area_note",
+                    "price_note", "product_link", "image_urls", "keywords")
+    _healed = False
+    for _f in _none_fields:
+        if (getattr(product, _f, None) or "").strip() in ("None", "none", "null"):
+            setattr(product, _f, "")
+            _healed = True
+    if _healed:
+        db.session.commit()
+
     if request.method == "POST":
         product.product_key   = request.form["product_key"].strip()
         product.name          = request.form["name"].strip()

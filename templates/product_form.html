@@ -183,7 +183,10 @@ function applyAll(data){
 
 function applyIfEmpty(id, value){
   const el = document.getElementById(id);
-  if(el && !el.value.trim()) el.value = value;
+  if(!el) return;
+  const cur = el.value.trim();
+  // "None" = قيمة مسجّلة غلط من bug قديم — نعتبرها فاضية
+  if(!cur || cur === 'None' || cur === 'none' || cur === 'null') el.value = value;
 }
 
 function renderResult(data){
