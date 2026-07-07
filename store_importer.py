@@ -71,6 +71,39 @@ def _parse_eo_price(value):
         return None
 
 
+def _extract_eo_prices(p):
+    """
+    استخراج (سعر التخفيض، السعر الأصلي) من منتج EasyOrders بشكل شامل.
+    بيجرّب: الحقول المباشرة بكل التسميات المحتملة → الـ variants كـ fallback.
+    البيانات الحقيقية أحياناً بتختلف عن التوثيق (sale_price بيكون null
+    على مستوى المنتج وموجود في الـ variants).
+    """
+    # 1) الحقول المباشرة (بكل التسميات المحتملة)
+    sale = (_parse_eo_price(p.get("sale_price"))
+            or _parse_eo_price(p.get("salePrice"))
+            or _parse_eo_price(p.get("discount_price"))
+            or _parse_eo_price(p.get("offer_price")))
+    original = (_parse_eo_price(p.get("price"))
+                or _parse_eo_price(p.get("original_price"))
+                or _parse_eo_price(p.get("regular_price")))
+
+    # 2) fallback: الـ variants (المنتجات متعددة الخيارات بتخزن السعر هناك)
+    if not sale or not original:
+        variants = p.get("variants") or []
+        v_sales = [x for x in (_parse_eo_price(v.get("sale_price")) for v in variants if isinstance(v, dict)) if x]
+        v_prices = [x for x in (_parse_eo_price(v.get("price")) for v in variants if isinstance(v, dict)) if x]
+        if not sale and v_sales:
+            sale = min(v_sales)
+        if not original and v_prices:
+            original = min(v_prices)
+
+    # 3) تنظيف منطقي: التخفيض لازم يكون أقل من الأصلي
+    if sale and original and sale >= original:
+        # مفيش تخفيض حقيقي — الـ sale هو السعر الفعلي
+        return None, sale
+    return sale, original
+
+
 def import_from_easyorders_api(api_key, max_products=500):
     """
     استيراد المنتجات من EasyOrders عبر الـ API الرسمي (بالـ API Key).
@@ -118,16 +151,22 @@ def import_from_easyorders_api(api_key, max_products=500):
     if not all_raw:
         return {"products": [], "error": "مفيش منتجات في المتجر"}
 
+    # ── تشخيص: نطبع حقول السعر من أول منتج في اللوج ──
+    # لو السعر طلع غلط، اللوج ده هيوضح شكل البيانات الحقيقية فوراً
+    first = all_raw[0]
+    print(f"🔍 EasyOrders price fields sample [{first.get('name','?')[:30]}]: "
+          f"price={first.get('price')!r} sale_price={first.get('sale_price')!r} "
+          f"variants={len(first.get('variants') or [])} "
+          f"keys={[k for k in first.keys() if 'price' in k.lower() or 'sale' in k.lower()]}")
+
     products = []
     for p in all_raw[:max_products]:
         name = (p.get("name") or "").strip()
         if not name:
             continue
 
-        # ── السعر: sale_price (سعر التخفيض) هو السعر الفعلي للبيع ──
-        # بنعالجه بأمان حتى لو جاي string أو "0"
-        sale = _parse_eo_price(p.get("sale_price"))
-        original = _parse_eo_price(p.get("price"))
+        # ── السعر: استخراج شامل (حقول مباشرة + variants) مع تفضيل التخفيض ──
+        sale, original = _extract_eo_prices(p)
         price = sale if sale else original
 
         # ── الوصف: كامل (مش مقطوع) عشان البوت يستخدمه في البيع ──
