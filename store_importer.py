@@ -30,6 +30,146 @@ HEADERS = {
 # =====================================================================
 # نقطة الدخول الرئيسية
 # =====================================================================
+def _fetch_easyorders_page(api_key, page, limit=100):
+    """يجيب صفحة واحدة من منتجات EasyOrders — بيرجع (list, error)"""
+    endpoint = "https://api.easy-orders.net/api/v1/external-apps/products"
+    try:
+        resp = requests.get(
+            endpoint,
+            params={"page": page, "limit": limit},
+            headers={"Api-Key": api_key, "Content-Type": "application/json"},
+            timeout=25,
+        )
+    except Exception as e:
+        return None, f"تعذّر الاتصال بـ EasyOrders: {str(e)[:80]}"
+
+    if resp.status_code in (401, 403):
+        return None, "مفتاح الـ API غير صحيح أو مالوش صلاحية قراءة المنتجات (products:read)"
+    if resp.status_code != 200:
+        return None, f"EasyOrders رجّع خطأ (كود {resp.status_code})"
+
+    try:
+        data = resp.json()
+    except Exception:
+        return None, "رد EasyOrders مش صالح"
+
+    # الرد ممكن يكون list مباشرة أو object فيه data/products
+    raw = data if isinstance(data, list) else (
+        data.get("data") or data.get("products") or []
+    )
+    return raw, None
+
+
+def _parse_eo_price(value):
+    """يحوّل السعر لرقم بأمان (بيتعامل مع string و None و 0)"""
+    if value is None:
+        return None
+    try:
+        num = float(value)
+        return num if num > 0 else None
+    except (ValueError, TypeError):
+        return None
+
+
+def import_from_easyorders_api(api_key, max_products=500):
+    """
+    استيراد المنتجات من EasyOrders عبر الـ API الرسمي (بالـ API Key).
+    ده الحل المضمون لمتاجر EasyOrders — بيجيب كل المنتجات بدقة.
+
+    - بيلف على كل الصفحات (pagination) عشان يجيب كل المنتجات مش أول 20 بس
+    - بيفضّل sale_price (سعر التخفيض) لأنه السعر الفعلي للبيع
+    - بيجيب الوصف كامل عشان الـ onboarding يبقى جاهز
+
+    التاجر بياخد الـ API Key من:
+    حساب EasyOrders → Public API → Create New API Key (بصلاحية products:read)
+
+    بيرجع dict: {"products": [...], "error": ...}
+    """
+    api_key = (api_key or "").strip()
+    if not api_key:
+        return {"products": [], "error": "مفتاح الـ API فارغ"}
+
+    # ── Pagination: نلف على كل الصفحات لحد ما المنتجات تخلص ──
+    all_raw = []
+    page = 1
+    per_page = 100
+    prev_first_id = None
+    while len(all_raw) < max_products:
+        raw, err = _fetch_easyorders_page(api_key, page, per_page)
+        if err:
+            # لو أول صفحة فشلت → خطأ حقيقي. لو صفحة لاحقة → نكتفي باللي جمعناه
+            if page == 1:
+                return {"products": [], "error": err}
+            break
+        if not raw:
+            break   # صفحة فاضية = مفيش منتجات تانية
+
+        # حماية من الـ APIs اللي بتتجاهل page وبترجّع نفس النتائج كل مرة
+        first_id = raw[0].get("id") or raw[0].get("slug") or raw[0].get("name")
+        if first_id and first_id == prev_first_id:
+            break   # نفس الصفحة اتكررت — نقف عشان مانلفش للأبد
+        prev_first_id = first_id
+
+        all_raw.extend(raw)
+        page += 1
+        if page > 50:
+            break   # حد أمان أقصى (50 صفحة)
+
+    if not all_raw:
+        return {"products": [], "error": "مفيش منتجات في المتجر"}
+
+    products = []
+    for p in all_raw[:max_products]:
+        name = (p.get("name") or "").strip()
+        if not name:
+            continue
+
+        # ── السعر: sale_price (سعر التخفيض) هو السعر الفعلي للبيع ──
+        # بنعالجه بأمان حتى لو جاي string أو "0"
+        sale = _parse_eo_price(p.get("sale_price"))
+        original = _parse_eo_price(p.get("price"))
+        price = sale if sale else original
+
+        # ── الوصف: كامل (مش مقطوع) عشان البوت يستخدمه في البيع ──
+        desc = re.sub(r"<iframe[^>]*>.*?</iframe>", " ", p.get("description", "") or "", flags=re.DOTALL)
+        desc = re.sub(r"<[^>]+>", " ", desc)
+        desc = re.sub(r"\s+", " ", desc).strip()[:1000]
+
+        # الصور
+        images = []
+        if p.get("thumb"):
+            images.append(p["thumb"])
+        for img in (p.get("images") or []):
+            if isinstance(img, str) and img:
+                images.append(img)
+
+        # الشحن المجاني
+        is_free = p.get("is_free_shipping", False)
+        price_note = ""
+        if price:
+            price_note = f"{price:.0f} ج" + (" شامل الشحن" if is_free else "")
+            # لو فيه تخفيض فعلي، نبرزه (سلاح بيع قوي)
+            if sale and original and sale < original:
+                price_note = f"{sale:.0f} ج بدل {original:.0f} ج" + (" — شامل الشحن" if is_free else "")
+
+        slug = p.get("slug", "")
+        products.append({
+            "name": name,
+            "description": desc,
+            "keywords": _make_keywords(name, ""),
+            "price_amount": price,
+            "price_original": original if (sale and original and sale < original) else None,
+            "price_note": price_note,
+            "features": "",
+            "product_link": "",   # الـ API مابيرجعش رابط الصفحة مباشرة
+            "image_urls": ",".join(images[:3]),
+            "is_free_shipping": is_free,
+            "easyorders_slug": slug,
+        })
+
+    return {"products": products, "error": None}
+
+
 def import_store(url, dialect="مصري", max_products=30):
     """
     يستورد المنتجات من رابط متجر.

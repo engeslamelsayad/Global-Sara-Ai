@@ -6,10 +6,11 @@
   <p class="page-sub">كل ما تملأ أكتر، كل ما البوت يبقى أقوى في البيع والإقناع</p>
 </div>
 
-{% if not product %}
 <div class="card" style="border:1px solid #DDD0F8; background:linear-gradient(135deg,#FBF9FF,#F4EEFF)">
   <h3 style="display:flex; align-items:center; gap:8px; margin-top:0">✨ مساعد الذكاء الاصطناعي</h3>
-  <p class="page-sub" style="margin-bottom:14px">اختر طريقة الإدخال — وصف نصي أو رابط الصفحة</p>
+  <p class="page-sub" style="margin-bottom:14px">
+    {% if product %}املأ الحقول الناقصة تلقائياً — وصف نصي أو رابط الصفحة{% else %}اختر طريقة الإدخال — وصف نصي أو رابط الصفحة{% endif %}
+  </p>
 
   <!-- Tabs -->
   <div style="display:flex; gap:0; margin-bottom:14px; border-radius:10px; overflow:hidden; border:1px solid #DDD0F8">
@@ -25,14 +26,15 @@
 
   <!-- Text input -->
   <div id="panel-text">
-    <textarea id="ai-short-input" placeholder="مثال: كريم للحبوب فيه شي بتر وزيت شاي، بيهدي الالتهاب" style="margin-bottom:10px"></textarea>
-    <button type="button" class="btn-ai" onclick="suggestFromText()">✨ اقترح لي التفاصيل</button>
+    <textarea id="ai-short-input" placeholder="مثال: كريم للحبوب فيه شي بتر وزيت شاي، بيهدي الالتهاب" style="margin-bottom:10px">{% if product %}{{ product.name }}{% if product.description %} — {{ product.description[:150] }}{% endif %}{% endif %}</textarea>
+    <button type="button" class="btn-ai" onclick="suggestFromText()">✨ {% if product %}املأ الحقول الناقصة بالـ AI{% else %}اقترح لي التفاصيل{% endif %}</button>
   </div>
 
   <!-- URL input -->
   <div id="panel-url" style="display:none">
     <input type="url" id="ai-url-input"
       placeholder="https://www.eecm.shop/products/eczema-treatment-cream"
+      value="{{ product.product_link if product and product.product_link else '' }}"
       style="margin-bottom:10px">
     <p class="helper-text" style="margin-bottom:10px">
       🔗 الـ AI هيفتح الصفحة ويستخرج منها الاسم والوصف والمميزات والأسئلة الشائعة — كل حاجة دفعة واحدة
@@ -42,7 +44,6 @@
 
   <div id="ai-result" class="ai-box"></div>
 </div>
-{% endif %}
 
 <form method="POST" class="card">
   <!-- ===== أساسيات ===== -->
@@ -52,7 +53,7 @@
   <input type="text" name="name" id="f-name" required value="{{ product.name if product else '' }}">
 
   <label>مفتاح المنتج (بالإنجليزي بدون مسافات) * <span class="hint">مثال: eczema_cream</span></label>
-  <input type="text" name="product_key" value="{{ product.product_key if product else '' }}" required>
+  <input type="text" name="product_key" id="f-product-key" value="{{ product.product_key if product else '' }}" required>
 
   <label>الوصف العام <span class="hint">ده اللي البوت بيشرحه للعميل</span></label>
   <textarea name="description" id="f-description">{{ product.description if product else '' }}</textarea>
@@ -148,17 +149,27 @@ function switchTab(tab){
   document.getElementById('tab-url').style.color       = tab==='url'  ? '#fff'    : '#6D28D9';
 }
 
+const IS_EDIT_MODE = {{ 'true' if product else 'false' }};
+
 function applyAll(data){
-  /* يملأ كل الحقول دفعة واحدة */
-  if(data.suggested_name)        applyField('f-name', data.suggested_name);
-  if(data.suggested_description) applyField('f-description', data.suggested_description);
-  if(data.suggested_keywords)    applyField('f-keywords', data.suggested_keywords);
-  if(data.features_text)         applyField('f-features', data.features_text);
-  if(data.who_benefits)          applyField('f-who-benefits', data.who_benefits);
-  if(data.results_timeline)      applyField('f-results-timeline', data.results_timeline);
-  if(data.closing_pitch)         applyField('f-closing-pitch', data.closing_pitch);
-  if(data.faq_text)              applyField('f-faq', data.faq_text);
-  if(data.price_note)            applyField('f-price-note', data.price_note);
+  /* يملأ كل الحقول دفعة واحدة.
+     في وضع التعديل: يملأ الحقول الفاضية بس — مايمسحش بيانات موجودة */
+  const set = IS_EDIT_MODE ? applyIfEmpty : applyField;
+  if(data.suggested_name)        set('f-name', data.suggested_name);
+  if(data.suggested_product_key) set('f-product-key', data.suggested_product_key);
+  if(data.suggested_description) set('f-description', data.suggested_description);
+  if(data.suggested_keywords)    set('f-keywords', data.suggested_keywords);
+  if(data.features_text)         set('f-features', data.features_text);
+  if(data.who_benefits)          set('f-who-benefits', data.who_benefits);
+  if(data.results_timeline)      set('f-results-timeline', data.results_timeline);
+  if(data.closing_pitch)         set('f-closing-pitch', data.closing_pitch);
+  if(data.faq_text)              set('f-faq', data.faq_text);
+  if(data.price_note)            set('f-price-note', data.price_note);
+}
+
+function applyIfEmpty(id, value){
+  const el = document.getElementById(id);
+  if(el && !el.value.trim()) el.value = value;
 }
 
 function renderResult(data){
@@ -169,10 +180,11 @@ function renderResult(data){
     <div class="ai-title">✨ اقتراحات الـ AI
       <button type="button" onclick="applyAll(window._lastAiData)"
         style="margin-right:auto; padding:4px 12px; border-radius:8px; background:#6D28D9; color:#fff; border:none; font-family:inherit; font-size:12px; font-weight:700; cursor:pointer">
-        ← تطبيق الكل دفعة واحدة
+        ${IS_EDIT_MODE ? '← املأ الحقول الفاضية' : '← تطبيق الكل دفعة واحدة'}
       </button>
     </div>
     ${data.suggested_name ? `<div class="ai-suggestion-item"><div class="label">الاسم</div>${data.suggested_name} <span class="ai-apply-btn" onclick="applyField('f-name',\`${data.suggested_name}\`)">تطبيق ←</span></div>` : ''}
+    ${data.suggested_product_key ? `<div class="ai-suggestion-item"><div class="label">مفتاح المنتج</div><code>${data.suggested_product_key}</code> <span class="ai-apply-btn" onclick="applyField('f-product-key',\`${data.suggested_product_key}\`)">تطبيق ←</span></div>` : ''}
     ${data.suggested_description ? `<div class="ai-suggestion-item"><div class="label">الوصف</div>${data.suggested_description} <span class="ai-apply-btn" onclick="applyField('f-description',\`${data.suggested_description}\`)">تطبيق ←</span></div>` : ''}
     ${data.suggested_keywords ? `<div class="ai-suggestion-item"><div class="label">كلمات البحث</div>${data.suggested_keywords} <span class="ai-apply-btn" onclick="applyField('f-keywords',\`${data.suggested_keywords}\`)">تطبيق ←</span></div>` : ''}
     ${data.features_text ? `<div class="ai-suggestion-item"><div class="label">المميزات</div><pre style="margin:4px 0;font-family:inherit;font-size:12px">${data.features_text}</pre><span class="ai-apply-btn" onclick="applyField('f-features',\`${data.features_text}\`)">تطبيق ←</span></div>` : ''}

@@ -92,19 +92,43 @@ def suggest_objection_responses(business_description, sample_product_name="", di
 def suggest_product_details(short_input, business_description="", dialect="مصري"):
     """
     مدخل: "كريم للحبوب فيه شي بتر وزيت شاي"
-    مخرج: اسم محسّن + وصف بيعي + كلمات مفتاحية للبحث (RAG)
+    مخرج: كل بيانات المنتج (نفس صيغة suggest_product_from_url) — اسم، وصف،
+          كلمات مفتاحية، مفتاح المنتج، مميزات، من يستفيد، متى تظهر النتيجة،
+          نص إغلاق، FAQ
     """
     prompt = f"""بزنس صاحبه وصفه: "{business_description or "غير محدد"}"
 مالك البزنس كتب عن منتج كده (نص خام بسيط):
 "{short_input}"
 
-حوّل هذا لبيانات منتج احترافية. رد بصيغة JSON بالضبط بهذا الشكل:
+حوّل هذا لبيانات منتج احترافية كاملة. رد بصيغة JSON بالضبط بهذا الشكل:
 {{
   "suggested_name": "اسم تسويقي جذاب للمنتج بلهجة {dialect}",
+  "suggested_product_key": "مفتاح إنجليزي قصير بحروف صغيرة بدون مسافات (استخدم _ بين الكلمات، مثال: eczema_cream أو sleep_spray) — يعبّر عن المنتج",
   "suggested_description": "وصف بيعي مقنع في جملتين أو ثلاثة، يبرز الفايدة الأساسية",
-  "suggested_keywords": "كلمة1,كلمة2,كلمة3,كلمة4 (كلمات يستخدمها العملاء فعلياً للسؤال عن المشكلة دي، مفصولة بفاصلة بدون مسافات)"
+  "suggested_keywords": "كلمة1,كلمة2,كلمة3,كلمة4 (كلمات يستخدمها العملاء فعلياً للسؤال عن المشكلة دي، مفصولة بفاصلة بدون مسافات)",
+  "features": ["ميزة 1", "ميزة 2", "ميزة 3"],
+  "who_benefits": "من يستفيد من هذا المنتج (وصف الجمهور المستهدف)",
+  "results_timeline": "متى تظهر النتيجة بعد الاستخدام",
+  "closing_pitch": "جملة إقناع قوية لإغلاق البيع لما العميل مش متأكد",
+  "faq_pairs": [
+    {{"q": "سؤال شائع 1", "a": "جواب مقنع 1"}},
+    {{"q": "سؤال شائع 2", "a": "جواب مقنع 2"}}
+  ]
 }}"""
-    return _ask_json(prompt)
+    result = _ask_json(prompt, max_tokens=1200)
+
+    # حوّل faq_pairs لـ text بسيط للـ textarea
+    if "faq_pairs" in result and isinstance(result["faq_pairs"], list):
+        result["faq_text"] = "\n".join(
+            f"س: {item.get('q','')}\nج: {item.get('a','')}"
+            for item in result["faq_pairs"]
+        )
+
+    # حوّل features list لـ text بسيط
+    if "features" in result and isinstance(result["features"], list):
+        result["features_text"] = "\n".join(result["features"])
+
+    return result
 
 
 # =====================================================================
@@ -201,6 +225,7 @@ def suggest_product_from_url(url, business_description="", dialect="مصري"):
 استخرج بيانات المنتج من هذا النص بدقة. رد بصيغة JSON فقط:
 {{
   "suggested_name": "اسم تسويقي جذاب للمنتج",
+  "suggested_product_key": "مفتاح إنجليزي قصير بحروف صغيرة بدون مسافات (استخدم _ بين الكلمات، مثال: eczema_cream) — يعبّر عن المنتج",
   "suggested_description": "وصف بيعي مقنع في 2-3 جمل يبرز الفايدة الأساسية",
   "suggested_keywords": "كلمة1,كلمة2,كلمة3,كلمة4,كلمة5 (كلمات يستخدمها العملاء للسؤال عن المشكلة)",
   "features": ["ميزة 1", "ميزة 2", "ميزة 3"],
@@ -229,3 +254,82 @@ def suggest_product_from_url(url, business_description="", dialect="مصري"):
         result["features_text"] = "\n".join(result["features"])
 
     return result
+
+
+def enrich_products_batch(products, business_description="", dialect="مصري"):
+    """
+    إثراء دفعة منتجات مستوردة بالمحتوى البيعي — بطلب AI واحد لكل دفعة صغيرة.
+    بياخد: [{name, description, price_note}, ...]
+    بيرجع: نفس الليستة مع إضافة: description (محسّن), keywords, features_text,
+           who_benefits, results_timeline, closing_pitch, faq_text
+
+    مصمّم للـ onboarding: منتجات مستوردة من متجر تبقى جاهزة للبيع فوراً.
+    """
+    if not products:
+        return []
+
+    # نبني وصف مختصر لكل منتج للـ prompt
+    items_desc = []
+    for i, p in enumerate(products):
+        items_desc.append(
+            f'{i}. الاسم: "{p.get("name","")}" | '
+            f'الوصف الحالي: "{(p.get("description") or "")[:150] or "لا يوجد"}" | '
+            f'السعر: {p.get("price_note") or "غير محدد"}'
+        )
+
+    prompt = f"""بزنس وصفه: "{business_description or "متجر إلكتروني"}"
+دي منتجات اتستوردت من متجر التاجر ومحتاجة محتوى بيعي كامل عشان بوت المبيعات يبيعها:
+
+{chr(10).join(items_desc)}
+
+لكل منتج، ولّد محتوى بيعي احترافي بلهجة {dialect}. رد بصيغة JSON فقط:
+{{
+  "products": [
+    {{
+      "index": 0,
+      "description": "وصف بيعي مقنع في 2-3 جمل يبرز الفايدة الأساسية",
+      "keywords": "كلمات يسأل بيها العملاء فعلياً مفصولة بفاصلة (7-10 كلمات)",
+      "features": ["ميزة 1", "ميزة 2", "ميزة 3"],
+      "who_benefits": "وصف الجمهور المستهدف",
+      "results_timeline": "متى تظهر النتيجة/الفايدة (لو منطقي للمنتج، وإلا اتركه فارغ)",
+      "closing_pitch": "جملة إقناع لإغلاق البيع",
+      "faq_pairs": [
+        {{"q": "سؤال شائع", "a": "جواب مقنع"}},
+        {{"q": "سؤال تاني", "a": "جواب"}}
+      ]
+    }}
+  ]
+}}
+مهم: رجّع كل المنتجات بنفس الـ index بتاعها."""
+
+    result = _ask_json(prompt, max_tokens=4000)
+    enriched_map = {}
+    for item in result.get("products", []):
+        idx = item.get("index")
+        if idx is None:
+            continue
+        if isinstance(item.get("features"), list):
+            item["features_text"] = "\n".join(item["features"])
+        if isinstance(item.get("faq_pairs"), list):
+            item["faq_text"] = "\n".join(
+                f"س: {q.get('q','')}\nج: {q.get('a','')}" for q in item["faq_pairs"]
+            )
+        enriched_map[idx] = item
+
+    # ندمج الإثراء مع المنتجات الأصلية
+    out = []
+    for i, p in enumerate(products):
+        merged = dict(p)
+        enr = enriched_map.get(i, {})
+        # الوصف: لو الأصلي فاضي أو قصير، استخدم المولّد
+        if enr.get("description") and len(merged.get("description") or "") < 40:
+            merged["description"] = enr["description"]
+        # الكلمات: ندمج المولّدة مع الموجودة
+        if enr.get("keywords"):
+            merged["keywords"] = enr["keywords"]
+        for field in ("features_text", "who_benefits", "results_timeline",
+                      "closing_pitch", "faq_text"):
+            if enr.get(field):
+                merged[field] = enr[field]
+        out.append(merged)
+    return out

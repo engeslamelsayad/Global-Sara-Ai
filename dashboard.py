@@ -113,6 +113,26 @@ def products_import_scan():
     })
 
 
+@dashboard_bp.route("/products/import/easyorders", methods=["POST"])
+@login_required_dashboard
+def products_import_easyorders():
+    """يستورد المنتجات من EasyOrders عبر الـ API Key الرسمي"""
+    import store_importer
+    api_key = (request.json.get("api_key") or "").strip()
+    if not api_key:
+        return jsonify({"error": "مفتاح الـ API فارغ"}), 400
+
+    result = store_importer.import_from_easyorders_api(api_key)
+    if result["error"]:
+        return jsonify({"error": result["error"]}), 400
+
+    return jsonify({
+        "method": "easyorders_api",
+        "products": result["products"],
+        "count": len(result["products"]),
+    })
+
+
 @dashboard_bp.route("/products/import/save", methods=["POST"])
 @login_required_dashboard
 def products_import_save():
@@ -164,6 +184,12 @@ def products_import_save():
             price_note=(item.get("price_note") or "").strip(),
             product_link=(item.get("product_link") or "").strip(),
             image_urls=(item.get("image_urls") or "").strip(),
+            # المحتوى البيعي (لو المنتجات اتأثرت بالـ AI قبل الحفظ)
+            features=(item.get("features_text") or "").strip() or None,
+            who_benefits=(item.get("who_benefits") or "").strip() or None,
+            results_timeline=(item.get("results_timeline") or "").strip() or None,
+            closing_pitch=(item.get("closing_pitch") or "").strip() or None,
+            faq=(item.get("faq_text") or "").strip() or None,
         )
         db.session.add(product)
         added += 1
@@ -171,6 +197,35 @@ def products_import_save():
     db.session.commit()
     _invalidate(tenant)
     return jsonify({"added": added, "skipped": skipped})
+
+
+@dashboard_bp.route("/products/import/enrich", methods=["POST"])
+@login_required_dashboard
+def products_import_enrich():
+    """
+    إثراء المنتجات المستوردة بالمحتوى البيعي بالـ AI قبل الحفظ.
+    بياخد دفعات صغيرة (5 منتجات/طلب AI) عشان الجودة والسرعة.
+    """
+    import ai_assist
+    tenant = _current_tenant()
+    products = request.json.get("products", [])
+    if not products:
+        return jsonify({"error": "لا توجد منتجات"}), 400
+
+    bc = tenant.bot_config
+    dialect = bc.dialect if bc else "مصري"
+    biz_desc = bc.business_description if bc and hasattr(bc, "business_description") else ""
+
+    enriched = []
+    BATCH = 5
+    try:
+        for i in range(0, len(products), BATCH):
+            batch = products[i:i + BATCH]
+            enriched.extend(ai_assist.enrich_products_batch(batch, biz_desc, dialect))
+    except Exception as e:
+        return jsonify({"error": f"فشل الإثراء: {str(e)[:100]}"}), 500
+
+    return jsonify({"products": enriched, "count": len(enriched)})
 
 
 @dashboard_bp.route("/products/new", methods=["GET", "POST"])
