@@ -300,6 +300,14 @@ def build_system_prompt(bundle, matched_product=None, state=None):
     static_prompt = f"""أنت {bc.bot_name}، {bc.bot_persona}.
 عمرك {bc.bot_age} سنة. بتتكلم بلهجة {bc.dialect} بنبرة {bc.tone}.
 
+[⛔ قاعدة اللهجة]
+التزمي تماماً بلهجة {bc.dialect} في كل كلمة من ردودك — من أول رسالة لآخر رسالة.
+ممنوع تخلطي لهجات (مثلاً كلمات شامية في رد مصري، أو مصرية في رد خليجي).
+لو اللهجة "سعودي" أو "إماراتي" أو "خليجي": استخدمي مفردات خليجية أصيلة
+(وش، كيف، أبغى/أبا، الحين، مره، زين، يعطيك العافية) وتجنّبي المصرية (إيه، إزاي، دلوقتي، أوي).
+لو اللهجة "مصري": استخدمي المصرية الطبيعية (إيه، إزاي، دلوقتي، خالص، أوي)
+وتجنّبي الشامية (هلق، شو، هيك، منيح).
+
 [اسم الشركة]
 {tenant.business_name}
 {tenant.business_description or ""}
@@ -334,6 +342,15 @@ def build_system_prompt(bundle, matched_product=None, state=None):
 ✅ لو العميل جه من إعلان منتج معيّن، استخدمي سعر وشحن المنتج ده مباشرة
 ✅ لما تعرفي المنتج، قولي السعر النهائي شامل الشحن (مش الشحن لوحده)
 الهدف: ماتوقفيش البيعة برقم شحن غلط. دايماً السعر النهائي شامل.
+
+[📷 لو العميل بعت صورة]
+- لو الصورة لمشكلة صحية/جلدية (حبوب، إكزيما، زوائد، فطريات...): حلليها بلطف واهتمام،
+  واوصفي اللي شايفاه بشكل عام (من غير تشخيص طبي جازم)، ورشّحي المنتج الأنسب من
+  قائمة المنتجات مع سعره النهائي. مثال: "شايفة إن فيه احمرار وتهيج واضح — ده بالظبط
+  اللي [المنتج] بيعالجه، وسعره X ج شامل التوصيل"
+- لو الصورة لمنتج من منتجاتنا: أكدي إنه متوفر واذكري سعره وميزته الأساسية
+- لو الصورة مش واضحة أو مش متعلقة: اسألي بلطف عن المشكلة اللي بيواجهها
+- ممنوع تدّعي إنك دكتورة أو تدي تشخيص طبي قاطع — انتي بترشّحي منتج مناسب بس
 
 [معالجة الاعتراضات]
 "غالي": {bc.objection_expensive_response or "اشرحي القيمة مقابل السعر"}
@@ -687,6 +704,59 @@ def download_meta_image(image_url, access_token):
     except Exception as e:
         print(f"⚠️ Image download failed: {e}")
         return None, None
+
+
+# =====================================================================
+# VOICE TRANSCRIPTION — تحويل الرسائل الصوتية لنص (Whisper API)
+# =====================================================================
+def transcribe_voice(audio_url, access_token=None):
+    """
+    يحمّل رسالة صوتية من Meta ويحوّلها لنص عربي عبر OpenAI Whisper.
+    بيرجع النص أو None لو التحويل مش متاح/فشل.
+
+    متغير البيئة المطلوب: OPENAI_API_KEY (لو مش موجود، بيرجع None
+    والبوت بيرد بالرسالة التوجيهية القديمة — degradation آمن)
+    """
+    openai_key = os.environ.get("OPENAI_API_KEY", "")
+    if not openai_key or not audio_url:
+        return None
+
+    # 1) تحميل الملف الصوتي من Meta CDN
+    audio_bytes = None
+    for params in ({}, {"access_token": access_token} if access_token else {}):
+        try:
+            r = requests.get(audio_url, params=params, timeout=20)
+            if r.status_code == 200 and r.content:
+                audio_bytes = r.content
+                break
+        except Exception:
+            continue
+    if not audio_bytes:
+        print("⚠️ Voice download failed")
+        return None
+    if len(audio_bytes) > 24 * 1024 * 1024:   # حد Whisper 25MB
+        print("⚠️ Voice file too large")
+        return None
+
+    # 2) التحويل عبر Whisper
+    try:
+        resp = requests.post(
+            "https://api.openai.com/v1/audio/transcriptions",
+            headers={"Authorization": f"Bearer {openai_key}"},
+            files={"file": ("voice.mp4", audio_bytes, "audio/mp4")},
+            data={"model": "whisper-1", "language": "ar"},
+            timeout=45,
+        )
+        if resp.status_code == 200:
+            text = (resp.json().get("text") or "").strip()
+            if text:
+                print(f"🎤 Voice transcribed: {text[:60]}...")
+                return text
+        else:
+            print(f"⚠️ Whisper error {resp.status_code}: {resp.text[:100]}")
+    except Exception as e:
+        print(f"⚠️ Whisper request failed: {e}")
+    return None
 
 
 # =====================================================================

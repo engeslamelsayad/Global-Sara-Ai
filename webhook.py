@@ -79,18 +79,27 @@ def receive_message():
                     print(f"👍 Sticker/like ignored from {sender_id}")
                     continue
 
-                # ── الرسائل الصوتية: رد توجيهي (مفيش تحويل صوت لنص) ──
+                # ── الرسائل الصوتية: تحويل لنص (Whisper) أو رد توجيهي ──
                 audio_atts = [a for a in attachments if a.get("type") == "audio"]
                 if audio_atts and not user_message:
-                    print(f"🎤 Voice message from {sender_id} — sending guidance")
-                    bc = bundle["tenant"].bot_config
-                    contact = (bc.contact_number if bc and bc.contact_number else "")
-                    voice_reply = (
-                        "سمعت إنك بعتّ رسالة صوتية 🎤 بس للأسف مش بقدر أسمع الصوت دلوقتي — "
-                        "ممكن تكتبلي اللي محتاجه بالكتابة وأنا تحت أمرك على طول 😊"
-                    )
-                    send_message(bundle, sender_id, voice_reply, page_id, platform)
-                    continue
+                    from bot_engine import transcribe_voice
+                    audio_url = audio_atts[0].get("payload", {}).get("url", "")
+                    page = bundle["pages"].get(page_id)
+                    token = page.access_token if page else None
+                    transcribed = transcribe_voice(audio_url, token)
+                    if transcribed:
+                        # التحويل نجح — الرسالة الصوتية بقت نص وبتتعالج عادي
+                        user_message = transcribed
+                        print(f"🎤 Voice → text from {sender_id}")
+                    else:
+                        # التحويل مش متاح (مفيش OPENAI_API_KEY) أو فشل — التوجيه القديم
+                        print(f"🎤 Voice message from {sender_id} — sending guidance")
+                        voice_reply = (
+                            "سمعت إنك بعتّ رسالة صوتية 🎤 بس للأسف مش بقدر أسمع الصوت دلوقتي — "
+                            "ممكن تكتبلي اللي محتاجه بالكتابة وأنا تحت أمرك على طول 😊"
+                        )
+                        send_message(bundle, sender_id, voice_reply, page_id, platform)
+                        continue
 
                 # ── صورة مرفقة (مش sticker) ──
                 image_b64, image_media_type = None, "image/jpeg"

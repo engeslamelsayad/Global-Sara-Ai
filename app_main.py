@@ -23,6 +23,10 @@ app.register_blueprint(analytics_bp)
 app.register_blueprint(auth_bp)
 app.register_blueprint(dashboard_bp)
 
+# صفحة الديمو الحية (عامة — أداة بيع الـ SaaS)
+from demo import demo_bp
+app.register_blueprint(demo_bp)
+
 # بدء المجدول المركزي (تقارير تليجرام الأسبوعية + معالجة الربط)
 from scheduler import start_scheduler
 start_scheduler(app)
