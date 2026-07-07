@@ -389,10 +389,28 @@ def build_system_prompt(bundle, matched_product=None, state=None):
 
     if matched_product:
         import json as _json
-        features_list  = _json.loads(matched_product.features or "[]")
-        faq_list       = _json.loads(matched_product.faq or "[]")
+
+        def _safe_list(raw):
+            """يقرأ JSON list أو نص عادي بأسطر (منتجات مستوردة) بدون كسر"""
+            if not raw:
+                return []
+            try:
+                parsed = _json.loads(raw)
+                return parsed if isinstance(parsed, list) else [str(parsed)]
+            except (ValueError, TypeError):
+                return [l.strip() for l in str(raw).split("\n") if l.strip()]
+
+        features_list  = _safe_list(matched_product.features)
+        raw_faq        = _safe_list(matched_product.faq)
         features_txt   = "\n".join(f"  • {f}" for f in features_list) if features_list else ""
-        faq_txt        = "\n".join(f"  س: {item['q']}\n  ج: {item['a']}" for item in faq_list) if faq_list else ""
+        # الـ faq ممكن يكون [{"q","a"}] أو أسطر نص "س: .. ج: .."
+        faq_lines = []
+        for item in raw_faq:
+            if isinstance(item, dict):
+                faq_lines.append(f"  س: {item.get('q','')}\n  ج: {item.get('a','')}")
+            else:
+                faq_lines.append(f"  {item}")
+        faq_txt = "\n".join(faq_lines) if faq_lines else ""
 
         prod_block = (
             f"⚠️ المنتج المقصود في رسالة العميل الحالية:\n"

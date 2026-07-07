@@ -185,11 +185,12 @@ def products_import_save():
             product_link=(item.get("product_link") or "").strip(),
             image_urls=(item.get("image_urls") or "").strip(),
             # المحتوى البيعي (لو المنتجات اتأثرت بالـ AI قبل الحفظ)
-            features=(item.get("features_text") or "").strip() or None,
+            # مهم: features و faq لازم يتخزنوا JSON (نفس صيغة النظام)
+            features=_parse_features(item.get("features_text") or "") if (item.get("features_text") or "").strip() else None,
             who_benefits=(item.get("who_benefits") or "").strip() or None,
             results_timeline=(item.get("results_timeline") or "").strip() or None,
             closing_pitch=(item.get("closing_pitch") or "").strip() or None,
-            faq=(item.get("faq_text") or "").strip() or None,
+            faq=_parse_faq(item.get("faq_text") or "") if (item.get("faq_text") or "").strip() else None,
         )
         db.session.add(product)
         added += 1
@@ -296,11 +297,36 @@ def product_edit(product_id):
         return redirect(url_for("dashboard.products_list"))
 
     import json as _j
-    feats_text = "\n".join(_j.loads(product.features or "[]"))
-    faqs_text  = "\n".join(
-        f"س: {item['q']}\nج: {item['a']}"
-        for item in _j.loads(product.faq or "[]")
-    )
+
+    def _safe_features_text(raw):
+        """يقرأ features سواء JSON list أو نص عادي (منتجات قديمة/مستوردة)"""
+        if not raw:
+            return ""
+        try:
+            parsed = _j.loads(raw)
+            if isinstance(parsed, list):
+                return "\n".join(str(x) for x in parsed)
+            return str(parsed)
+        except (ValueError, TypeError):
+            return raw   # نص عادي بالفعل — نعرضه زي ما هو
+
+    def _safe_faq_text(raw):
+        """يقرأ faq سواء JSON [{"q","a"}] أو نص عادي"""
+        if not raw:
+            return ""
+        try:
+            parsed = _j.loads(raw)
+            if isinstance(parsed, list):
+                return "\n".join(
+                    f"س: {item.get('q','')}\nج: {item.get('a','')}"
+                    for item in parsed if isinstance(item, dict)
+                )
+            return str(parsed)
+        except (ValueError, TypeError):
+            return raw   # نص عادي (زي "س: ...\nج: ...") — نعرضه زي ما هو
+
+    feats_text = _safe_features_text(product.features)
+    faqs_text  = _safe_faq_text(product.faq)
     return render_template("product_form.html", tenant=tenant, product=product,
                            product_features_text=feats_text, product_faq_text=faqs_text)
 
