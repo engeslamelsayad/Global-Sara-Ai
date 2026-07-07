@@ -62,6 +62,18 @@ def run():
                 f"ALTER TABLE tenants ADD COLUMN {col} {typ}",
                 f"tenants.{col}")
 
+        print("\n=== 1ج. جدول bot_configs (العروض الديناميكية) ===")
+        for col, typ in [
+            ("offer_hesitation_enabled",   "BOOLEAN DEFAULT FALSE"),
+            ("offer_hesitation_threshold", "INTEGER DEFAULT 2"),
+            ("offer_hesitation_percent",   "INTEGER DEFAULT 10"),
+            ("offer_bundle_enabled",       "BOOLEAN DEFAULT FALSE"),
+            ("offer_bundle_text",          "TEXT"),
+        ]:
+            ok_all &= safe_alter(conn,
+                f"ALTER TABLE bot_configs ADD COLUMN {col} {typ}",
+                f"bot_configs.{col}")
+
         print("\n=== 2. جدول products (الحقول الجديدة) ===")
         for col, typ in [
             ("features",         "TEXT"),

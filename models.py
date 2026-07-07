@@ -160,6 +160,13 @@ class BotConfig(db.Model):
     max_tokens          = db.Column(db.Integer, default=600)
     model_name           = db.Column(db.String(60), default="claude-sonnet-4-6")
 
+    # ── العروض الديناميكية ──
+    offer_hesitation_enabled   = db.Column(db.Boolean, default=False)   # خصم عند التردد
+    offer_hesitation_threshold = db.Column(db.Integer, default=2)       # عدد الاعتراضات
+    offer_hesitation_percent   = db.Column(db.Integer, default=10)      # نسبة الخصم
+    offer_bundle_enabled       = db.Column(db.Boolean, default=False)   # عرض bundle لمنتجين
+    offer_bundle_text          = db.Column(db.Text)                     # نص عرض الـ bundle
+
     created_at    = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at    = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

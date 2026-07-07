@@ -112,6 +112,28 @@ def get_tenant_analytics(tenant):
     # تحليل يوضّح للتاجر فين بيخسر مبيعات
     lost = _compute_lost_opportunities(states, tenant_products, normalize_product)
 
+    # ══ أداء الإعلانات ══════════════════════════════════
+    # ربط مصدر الإعلان بالتحويل — ذهب للتاجر: يعرف أنهي إعلان بيبيع فعلاً
+    ads_map = defaultdict(lambda: {"convos": 0, "orders": 0})
+    for s in states:
+        title = (s.get("source_ad_title") or "").strip()
+        if not title:
+            continue
+        ads_map[title]["convos"] += 1
+        if s.get("has_order"):
+            ads_map[title]["orders"] += 1
+    ads_performance = [
+        {
+            "title": t,
+            "convos": v["convos"],
+            "orders": v["orders"],
+            "conversion": (v["orders"] / v["convos"] * 100) if v["convos"] else 0,
+        }
+        for t, v in ads_map.items()
+    ]
+    # ترتيب: الأعلى محادثات أولاً (الأهم للمراجعة)
+    ads_performance.sort(key=lambda a: a["convos"], reverse=True)
+
     return {
         "total_conversations": total_conversations,
         "active_last_hour": active_last_hour,
@@ -131,6 +153,7 @@ def get_tenant_analytics(tenant):
         "product_inquiries": dict(product_inquiries),
         "recent_orders": all_orders[:15],
         "lost_opportunities": lost,   # ⭐ الفرص الضايعة
+        "ads_performance": ads_performance,   # ⭐ أداء الإعلانات
         "updated_at": now.strftime("%Y-%m-%d %H:%M UTC"),
     }
 
@@ -285,6 +308,29 @@ def build_analytics_html(tenant, data):
     {gap_rows}
     """
 
+    # ── HTML أداء الإعلانات ──
+    ads = data.get("ads_performance", [])
+    if ads:
+        ads_rows = "".join(
+            f'<div class="bar-row">'
+            f'<div class="lbl" style="width:220px" title="{a["title"]}">{a["title"][:35]}</div>'
+            f'<div style="flex:1;font-size:13px;color:#475569">'
+            f'<b>{a["convos"]}</b> محادثة · <b style="color:#10b981">{a["orders"]}</b> طلب · '
+            f'تحويل <b style="color:{"#10b981" if a["conversion"]>=20 else "#ef4444"}">{a["conversion"]:.0f}%</b>'
+            f'</div></div>'
+            for a in ads[:10]
+        )
+        ads_html = f"""
+<div class="sec" style="border:2px solid #6D28D9">
+  <h3>📢 أداء الإعلانات — أنهي إعلان بيبيع فعلاً</h3>
+  <p style="font-size:12px;color:#94a3b8;margin:0 0 10px">
+    إعلان جايب محادثات كتير بتحويل ضعيف = بيهدر فلوسك. إعلان تحويله عالي = زوّد ميزانيته.
+  </p>
+  {ads_rows}
+</div>"""
+    else:
+        ads_html = ""
+
     return f"""<!DOCTYPE html><html dir="rtl" lang="ar">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{tenant.business_name} — Analytics</title><style>{_CSS}</style>
@@ -308,6 +354,7 @@ def build_analytics_html(tenant, data):
   <h3>💸 الفرص الضايعة — فين بتخسر مبيعات</h3>
   {lost_html}
 </div>
+{ads_html}
 
 <div class="sec"><h3>📬 Follow-up Stats</h3>
   <div class="grid">

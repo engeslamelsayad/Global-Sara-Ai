@@ -344,3 +344,39 @@ def enrich_products_batch(products, business_description="", dialect="مصري")
                 merged[field] = enr[field]
         out.append(merged)
     return out
+
+
+def analyze_lost_conversations(samples, dialect="مصري"):
+    """
+    تحليل نوعي بالـ AI لأسباب فقدان البيع — للتقرير الأسبوعي.
+    samples: قائمة نصوص محادثات مختصرة (عملاء اهتموا ومااشتروش)
+    بيرجع: {"breakdown": [{"reason","percent"}], "suggestions": [..]}
+    """
+    if not samples:
+        return None
+
+    convos = "\n\n---\n\n".join(
+        f"محادثة {i+1}:\n{s[:800]}" for i, s in enumerate(samples[:12])
+    )
+    prompt = f"""أنت محلل مبيعات خبير. دي عينة من محادثات عملاء اهتموا بالمنتجات لكن ماكملوش الشراء:
+
+{convos}
+
+حلّل أسباب فقدان البيع وقسّمها بالنسب التقريبية، واقترح تحسينات عملية.
+رد بصيغة JSON فقط:
+{{
+  "breakdown": [
+    {{"reason": "السبب (مثلاً: اعتراض على السعر)", "percent": 40}},
+    {{"reason": "سبب آخر", "percent": 30}}
+  ],
+  "suggestions": [
+    "اقتراح عملي 1 بلهجة {dialect}",
+    "اقتراح عملي 2"
+  ]
+}}
+أقصى 4 أسباب و3 اقتراحات. خلّي الاقتراحات محددة وقابلة للتنفيذ."""
+
+    result = _ask_json(prompt, max_tokens=1500)
+    if result.get("error") or "breakdown" not in result:
+        return None
+    return result

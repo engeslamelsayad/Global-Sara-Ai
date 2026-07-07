@@ -128,7 +128,7 @@ def process_link_messages(app):
         pass
 
 
-def build_weekly_report(tenant, data):
+def build_weekly_report(tenant, data, loss_analysis=None):
     """يبني نص التقرير الأسبوعي بصيغة HTML لتليجرام"""
     lost = data.get("lost_opportunities", {})
 
@@ -153,6 +153,29 @@ def build_weekly_report(tenant, data):
                 f"واتباع {worst['bought']} بس (تحويل {worst['conversion']:.0f}%)"
             )
 
+    # ── تحليل AI لأسباب فقدان البيع ──
+    ai_section = ""
+    if loss_analysis and loss_analysis.get("breakdown"):
+        lines = ["\n\n🧠 <b>تحليل AI: ليه العملاء ماشتروش؟</b>"]
+        for item in loss_analysis["breakdown"][:4]:
+            lines.append(f"• {item.get('reason','')}: <b>{item.get('percent',0)}%</b>")
+        if loss_analysis.get("suggestions"):
+            lines.append("\n💡 <b>اقتراحات للتحسين:</b>")
+            for s in loss_analysis["suggestions"][:3]:
+                lines.append(f"← {s}")
+        ai_section = "\n".join(lines)
+
+    # ── أداء الإعلانات ──
+    ads_section = ""
+    ads = data.get("ads_performance", [])
+    if ads:
+        lines = ["\n\n📢 <b>أداء الإعلانات:</b>"]
+        for ad in ads[:3]:
+            lines.append(
+                f"• «{ad['title'][:30]}»: {ad['convos']} محادثة → "
+                f"{ad['orders']} طلب (تحويل <b>{ad['conversion']:.0f}%</b>)")
+        ads_section = "\n".join(lines)
+
     report = f"""📊 <b>التقرير الأسبوعي — {tenant.business_name}</b>
 ━━━━━━━━━━━━━━━━━
 
@@ -166,7 +189,7 @@ def build_weekly_report(tenant, data):
 
 💸 <b>الفرص الضايعة:</b>
 مهتمين ما اشتروش: <b>{lost.get('interested_no_order', 0)}</b>
-اعترضوا على السعر: <b>{lost.get('objections', 0)}</b>{gap_line}
+اعترضوا على السعر: <b>{lost.get('objections', 0)}</b>{gap_line}{ai_section}{ads_section}
 
 ━━━━━━━━━━━━━━━━━
 🤖 تقرير تلقائي من بوت المبيعات"""

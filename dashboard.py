@@ -447,6 +447,13 @@ def settings_bot():
         bc.debounce_seconds = int(request.form.get("debounce_seconds") or 45)
         bc.enable_vision    = bool(request.form.get("enable_vision"))
 
+        # العروض الديناميكية
+        bc.offer_hesitation_enabled   = bool(request.form.get("offer_hesitation_enabled"))
+        bc.offer_hesitation_threshold = int(request.form.get("offer_hesitation_threshold") or 2)
+        bc.offer_hesitation_percent   = int(request.form.get("offer_hesitation_percent") or 10)
+        bc.offer_bundle_enabled       = bool(request.form.get("offer_bundle_enabled"))
+        bc.offer_bundle_text          = request.form.get("offer_bundle_text", "").strip()
+
         db.session.commit()
         _invalidate(tenant)
         flash("تم تحديث إعدادات البوت ✅", "success")

@@ -72,6 +72,42 @@
   <label>افتتاحيات ممنوعة <span class="hint">كل جملة في سطر — جمل بداية ضعيفة ممنوع البوت يستخدمها</span></label>
   <textarea name="forbidden_openers">{{ forbidden_openers }}</textarea>
 
+  <h3 style="margin-top:24px">🎯 العروض الديناميكية</h3>
+  <p class="helper-text" style="margin-bottom:12px">عروض تلقائية ذكية بتظهر في اللحظة المناسبة لإنقاذ البيعة وزيادة قيمة الطلب</p>
+
+  <div style="background:#F8FAFC; border-radius:12px; padding:14px; margin-bottom:12px">
+    <label style="display:flex; align-items:center; gap:10px; cursor:pointer; margin-bottom:10px">
+      <input type="checkbox" name="offer_hesitation_enabled" {{ 'checked' if bc.offer_hesitation_enabled }}
+             style="width:18px; height:18px">
+      <strong>خصم إنقاذ البيعة</strong>
+      <span class="hint">— لو العميل اعترض كذا مرة، البوت يعرض خصم تلقائياً</span>
+    </label>
+    <div style="display:flex; gap:12px; flex-wrap:wrap">
+      <div style="flex:1; min-width:140px">
+        <label style="font-size:12px">بعد كام اعتراض؟</label>
+        <input type="number" name="offer_hesitation_threshold" min="1" max="5"
+               value="{{ bc.offer_hesitation_threshold or 2 }}">
+      </div>
+      <div style="flex:1; min-width:140px">
+        <label style="font-size:12px">نسبة الخصم %</label>
+        <input type="number" name="offer_hesitation_percent" min="5" max="50"
+               value="{{ bc.offer_hesitation_percent or 10 }}">
+      </div>
+    </div>
+  </div>
+
+  <div style="background:#F8FAFC; border-radius:12px; padding:14px; margin-bottom:12px">
+    <label style="display:flex; align-items:center; gap:10px; cursor:pointer; margin-bottom:10px">
+      <input type="checkbox" name="offer_bundle_enabled" {{ 'checked' if bc.offer_bundle_enabled }}
+             style="width:18px; height:18px">
+      <strong>عرض الباقة (Bundle)</strong>
+      <span class="hint">— لو العميل سأل عن منتجين، البوت يقترح ياخدهم مع بعض</span>
+    </label>
+    <label style="font-size:12px">نص العرض (اختياري)</label>
+    <textarea name="offer_bundle_text" style="min-height:50px"
+              placeholder="مثال: لو خدتهم مع بعض، الشحن مرة واحدة بس — توفير حقيقي!">{{ bc.offer_bundle_text or '' }}</textarea>
+  </div>
+
   <h3 style="margin-top:24px">معالجة الاعتراضات</h3>
   <button type="button" class="btn-ai" onclick="suggestObjections()">✨ اقترح ردود اعتراضات مناسبة</button>
   <div id="ai-obj-result" class="ai-box"></div>

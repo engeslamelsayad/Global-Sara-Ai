@@ -73,7 +73,8 @@ def load_state(tenant_id, sender_id):
         except Exception as e:
             print(f"⚠️ Redis load error: {e}")
     with _memory_lock:
-        return _memory_meta.get(key, {}).copy()
+        cached = _memory_meta.get(key)
+        return json.loads(json.dumps(cached, ensure_ascii=False)) if cached else {}
 
 
 def save_state(tenant_id, sender_id, state):
@@ -86,26 +87,33 @@ def save_state(tenant_id, sender_id, state):
         except Exception as e:
             print(f"⚠️ Redis save error: {e}")
     with _memory_lock:
-        _memory_meta[key] = state.copy()
+        _memory_meta[key] = json.loads(json.dumps(state, ensure_ascii=False))
 
 
 def list_tenant_states(tenant_id):
     """يرجع كل حالات محادثات tenant معين — للاستخدام في حساب الـ analytics"""
+    return [s for _, s in list_tenant_states_with_ids(tenant_id)]
+
+
+def list_tenant_states_with_ids(tenant_id):
+    """يرجع [(sender_id, state), ...] — للمتابعات اللي محتاجة تبعت رسائل"""
     prefix = f"conv:{tenant_id}:"
     r = get_redis()
     if r:
         try:
-            states = []
+            out = []
             for key in r.scan_iter(match=f"{prefix}*"):
                 raw = r.get(key)
                 if raw:
-                    states.append(json.loads(raw))
-            return states
+                    k = key.decode() if isinstance(key, bytes) else key
+                    out.append((k[len(prefix):], json.loads(raw)))
+            return out
         except Exception as e:
             print(f"⚠️ Redis scan error: {e}")
             return []
     with _memory_lock:
-        return [v.copy() for k, v in _memory_meta.items() if k.startswith(prefix)]
+        return [(k[len(prefix):], json.loads(json.dumps(v, ensure_ascii=False)))
+                for k, v in _memory_meta.items() if k.startswith(prefix)]
 
 
 def default_state(tenant_id, page_id, platform):
@@ -488,6 +496,31 @@ def build_system_prompt(bundle, matched_product=None, state=None):
             f"أضيفي |DISCOUNT{state['has_discount']} عند تسجيل الطلب."
         )
 
+    # ── العروض الديناميكية ──
+    if state and bc:
+        # 1) خصم التردد: العميل اعترض أكتر من مرة → اعرضي خصم لإنقاذ البيعة
+        if (getattr(bc, "offer_hesitation_enabled", False)
+                and state.get("objections_count", 0) >= (getattr(bc, "offer_hesitation_threshold", 2) or 2)
+                and not state.get("dynamic_offer_used")
+                and not state.get("has_order")):
+            pct = getattr(bc, "offer_hesitation_percent", 10) or 10
+            dynamic_parts.append(
+                f"🎯 عرض إنقاذ البيعة: العميل متردد جداً (اعترض {state['objections_count']} مرات). "
+                f"اعرضي عليه الآن خصم {pct}% كعرض خاص لفترة محدودة — قوليها بحماس وكأنه عرض استثنائي ليه. "
+                f"لو وافق وسجّل الطلب، أضيفي |DISCOUNT{pct} في نهاية سطر [ORDER|...]."
+            )
+        # 2) عرض الـ bundle: العميل سأل عن منتجين → اعرضي ياخدهم مع بعض
+        if (getattr(bc, "offer_bundle_enabled", False)
+                and len(state.get("products_asked", [])) >= 2
+                and not state.get("bundle_offer_used")
+                and not state.get("has_order")):
+            bundle_txt = (getattr(bc, "offer_bundle_text", "") or
+                          "لو خدتهم مع بعض في نفس الطلب، الشحن مرة واحدة بس — توفير حقيقي!")
+            dynamic_parts.append(
+                f"🎁 عرض الباقة: العميل مهتم بأكتر من منتج ({len(state['products_asked'])} منتجات). "
+                f"اقترحي عليه ياخدهم مع بعض: \"{bundle_txt}\""
+            )
+
     dynamic_prompt = "\n\n".join(dynamic_parts)
 
     return [
@@ -589,6 +622,21 @@ def get_ai_response(bundle, sender_id, user_message, state,
        matches_category(user_message, keywords, "objection_unsure") or \
        matches_category(user_message, keywords, "objection_later"):
         state["stage"] = "OBJECTION"
+        state["objections_count"] = state.get("objections_count", 0) + 1
+
+    # العروض الديناميكية: لو الشروط تحققت في الرد ده، نعلّم إن العرض اتقدّم
+    # (عشان مايتكررش في كل رسالة)
+    if bc:
+        if (getattr(bc, "offer_hesitation_enabled", False)
+                and state.get("objections_count", 0) >= (getattr(bc, "offer_hesitation_threshold", 2) or 2)
+                and not state.get("dynamic_offer_used")):
+            state["dynamic_offer_used"] = True
+            print(f"🎯 Dynamic hesitation offer triggered for {sender_id}")
+        if (getattr(bc, "offer_bundle_enabled", False)
+                and len(state.get("products_asked", [])) >= 2
+                and not state.get("bundle_offer_used")):
+            state["bundle_offer_used"] = True
+            print(f"🎁 Bundle offer triggered for {sender_id}")
 
     response_text = response_text.replace("**", "").replace("*", "")
 
@@ -661,6 +709,28 @@ def send_message(bundle, sender_id, text, page_id, platform):
         )
     except Exception as e:
         print(f"❌ Send message error: {e}")
+
+
+def _telegram_alert(tenant, text):
+    """
+    تنبيه تليجرام فوري للتاجر (لو مربوط) — للأحداث الحرجة:
+    طلب جديد، عميل غاضب، طلب تدخل بشري.
+    Fire-and-forget: أي فشل مايأثرش على flow البوت.
+    """
+    try:
+        if not getattr(tenant, "telegram_enabled", False):
+            return
+        chat_id = getattr(tenant, "telegram_chat_id", None)
+        if not chat_id:
+            return
+        import telegram_bot
+        threading.Thread(
+            target=telegram_bot.send_message,
+            args=(chat_id, text),
+            daemon=True,
+        ).start()
+    except Exception as e:
+        print(f"⚠️ Telegram alert error: {e}")
 
 
 def send_image(bundle, sender_id, image_url, page_id, platform):
@@ -953,6 +1023,11 @@ def do_process_message(tenant_id, sender_id, user_message, page_id, platform,
             "تمام! هبعتلك موظف متخصص دلوقتي. لحظة صغيرة ومحدش هيسيبك وحدك 💙",
             page_id, platform)
         apply_stage_labels(bundle, sender_id, page_id, "human_needed")
+        # ── تنبيه تليجرام فوري: عميل طالب موظف ──
+        _telegram_alert(bundle["tenant"],
+            f"🙋 <b>عميل طالب يكلم موظف!</b>\n"
+            f"آخر رسالة: «{user_message[:100]}»\n"
+            f"البوت اتوقف عن الرد — افتح الإنبوكس ورد عليه.")
         save_state(tenant_id, sender_id, state)
         return
 
@@ -966,6 +1041,31 @@ def do_process_message(tenant_id, sender_id, user_message, page_id, platform,
         save_order(bundle["tenant"], new_order, page_id)
         print(f"✅ Order saved for tenant {tenant_id}: {new_order['product']}")
         apply_stage_labels(bundle, sender_id, page_id, "ordered")
+
+        # ── تنبيه تليجرام فوري: طلب جديد ──
+        _telegram_alert(bundle["tenant"],
+            f"🛒 <b>طلب جديد!</b>\n"
+            f"المنتج: {new_order.get('product','')}\n"
+            f"العميل: {new_order.get('name','')} — {new_order.get('phone','')}\n"
+            f"العنوان: {new_order.get('address','')[:60]}")
+
+        # ── Upsell وقت الطلب: اقترح منتج مكمّل بعد تأكيد الطلب ──
+        if matched_product and (matched_product.cross_selling or "").strip() \
+                and not state.get("upsell_sent"):
+            cross_key = matched_product.cross_selling.split(",")[0].strip()
+            cross_prod = next(
+                (p for p in bundle["products"]
+                 if p.product_key == cross_key and p.is_active), None)
+            if cross_prod:
+                time.sleep(1.0)
+                upsell_msg = (
+                    f"🎁 معلومة على الماشي: كتير من عملائنا بيضيفوا "
+                    f"«{cross_prod.name}» مع طلبهم — {cross_prod.price_note or ''}. "
+                    f"تحب أضيفهولك في نفس الطلب من غير شحن إضافي؟ 😊"
+                )
+                send_message(bundle, sender_id, upsell_msg, page_id, platform)
+                state["upsell_sent"] = True
+                print(f"🎁 Upsell offered: {cross_prod.product_key}")
 
     # ── صورة المنتج: تتبعت مرة واحدة لكل منتج (تقلل خطأ إرسال منتج غلط) ──
     if matched_product and (matched_product.image_urls or "").strip():
@@ -997,6 +1097,11 @@ def do_process_message(tenant_id, sender_id, user_message, page_id, platform,
         state["stage"] = "COMPLAINT"
         print(f"🚨 Complaint detected for {sender_id}")
         apply_stage_labels(bundle, sender_id, page_id, "complaint")
+        # ── تنبيه تليجرام فوري: عميل غاضب محتاج تدخل ──
+        _telegram_alert(bundle["tenant"],
+            f"🚨 <b>عميل غاضب محتاج تدخل!</b>\n"
+            f"آخر رسالة: «{user_message[:100]}»\n"
+            f"افتح الإنبوكس وتدخّل بسرعة قبل ما تخسره.")
 
     save_state(tenant_id, sender_id, state)
     print(f"✅ Done — tenant={tenant_id[:8]} stage={state['stage']}")
