@@ -329,7 +329,15 @@ def build_analytics_html(tenant, data):
   {ads_rows}
 </div>"""
     else:
-        ads_html = ""
+        ads_html = """
+<div class="sec" style="border:2px solid #6D28D9">
+  <h3>📢 أداء الإعلانات — أنهي إعلان بيبيع فعلاً</h3>
+  <p style="font-size:13px;color:#64748b;margin:0">
+    لسه مفيش بيانات — القسم ده بيتملأ تلقائياً لما عملاء يدخلوا من إعلانات
+    Click-to-Messenger. هتشوف هنا: كل إعلان جاب كام محادثة وكام طلب ونسبة تحويله.
+    <br><span style="color:#94a3b8;font-size:12px">💡 نصيحة: خلّي عنوان الإعلان (ad title) فيه اسم المنتج عشان البوت يتعرّف عليه تلقائياً.</span>
+  </p>
+</div>"""
 
     return f"""<!DOCTYPE html><html dir="rtl" lang="ar">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">

@@ -6,6 +6,33 @@
   <p class="page-sub">مراحل تلقائية بتتبعت للعميل لو ماردش — تقدر تضيف أي عدد من المراحل</p>
 </div>
 
+<!-- بانر الاسترجاع الذكي -->
+<div class="card" style="border:2px solid #10b981; background:linear-gradient(135deg,#F0FDF4,#DCFCE7); margin-bottom:16px">
+  <h3 style="margin-top:0; color:#059669; display:flex; align-items:center; gap:8px">
+    🧠 الاسترجاع الذكي (Smart Recovery) — مفعّل تلقائياً
+  </h3>
+  <p style="font-size:14px; line-height:1.9; margin:0">
+    المتابعات مبقتش رسالة واحدة للكل — البوت بيحلّل <b>سبب توقف كل عميل</b> ويخصّص الرسالة:
+  </p>
+  <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; margin-top:12px">
+    <div style="background:#fff; border-radius:10px; padding:12px; font-size:13px">
+      <b>💰 اعترض على السعر</b><br>
+      <span style="color:#64748b">رسالة إنقاذ بخصم المرحلة + تذكير بالمنتج بالاسم</span>
+    </div>
+    <div style="background:#fff; border-radius:10px; padding:12px; font-size:13px">
+      <b>❤️ كان مهتم وسكت</b><br>
+      <span style="color:#64748b">تذكير ودّي بالمنتج اللي سأل عنه + عرض المساعدة</span>
+    </div>
+    <div style="background:#fff; border-radius:10px; padding:12px; font-size:13px">
+      <b>✍️ نصك المخصص</b><br>
+      <span style="color:#64748b">لو كتبت نص للمرحلة، بيتستخدم — وبيدعم {product} و {discount}</span>
+    </div>
+  </div>
+  <p style="font-size:12px; color:#64748b; margin:12px 0 0">
+    ⏱ بيشتغل تلقائياً كل 15 دقيقة · بيستبعد: اللي طلبوا، اللي الموديريتور متدخل معاهم، واللي اشتكوا
+  </p>
+</div>
+
 <div class="card">
   {% if stages %}
     {% for s in stages %}

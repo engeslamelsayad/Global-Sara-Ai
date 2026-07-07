@@ -859,13 +859,27 @@ def telegram_disconnect():
 @dashboard_bp.route("/telegram/test", methods=["POST"])
 @login_required_dashboard
 def telegram_test():
-    """يبعت تقرير تجريبي فوراً للتأكد إن الربط شغّال"""
+    """يبعت تقرير تجريبي فوراً للتأكد إن الربط شغّال — شامل تحليل الـ AI"""
     import telegram_bot, analytics
     tenant = _current_tenant()
     if not tenant.telegram_enabled or not tenant.telegram_chat_id:
         return jsonify({"ok": False, "error": "لم يتم ربط تليجرام بعد"}), 400
     data = analytics.get_tenant_analytics(tenant)
-    report = telegram_bot.build_weekly_report(tenant, data)
+
+    # تحليل AI لأسباب فقدان البيع (نفس اللي بيحصل في تقرير السبت)
+    loss_analysis = None
+    try:
+        import ai_assist
+        from scheduler import _collect_lost_samples
+        samples = _collect_lost_samples(tenant)
+        if samples:
+            bc = tenant.bot_config
+            loss_analysis = ai_assist.analyze_lost_conversations(
+                samples, bc.dialect if bc else "مصري")
+    except Exception as e:
+        print(f"⚠️ AI analysis in test report failed: {e}")
+
+    report = telegram_bot.build_weekly_report(tenant, data, loss_analysis=loss_analysis)
     ok = telegram_bot.send_message(tenant.telegram_chat_id, report)
     return jsonify({"ok": ok})
 
