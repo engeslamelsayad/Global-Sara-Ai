@@ -646,6 +646,35 @@ def send_message(bundle, sender_id, text, page_id, platform):
         print(f"❌ Send message error: {e}")
 
 
+def send_image(bundle, sender_id, image_url, page_id, platform):
+    """يبعت صورة للعميل عبر Meta attachment API — بيرجع True لو نجح"""
+    page = bundle["pages"].get(page_id)
+    if not page or not page.access_token or not image_url:
+        return False
+    try:
+        r = requests.post(
+            "https://graph.facebook.com/v18.0/me/messages",
+            params={"access_token": page.access_token},
+            json={
+                "recipient": {"id": sender_id},
+                "message": {
+                    "attachment": {
+                        "type": "image",
+                        "payload": {"url": image_url.strip(), "is_reusable": True},
+                    }
+                },
+            },
+            timeout=15,
+        )
+        if r.status_code == 200:
+            return True
+        print(f"⚠️ Send image failed ({r.status_code}): {r.text[:120]}")
+        return False
+    except Exception as e:
+        print(f"⚠️ Send image error: {e}")
+        return False
+
+
 def download_meta_image(image_url, access_token):
     try:
         r = requests.get(image_url, params={"access_token": access_token}, timeout=15)
@@ -867,6 +896,16 @@ def do_process_message(tenant_id, sender_id, user_message, page_id, platform,
         save_order(bundle["tenant"], new_order, page_id)
         print(f"✅ Order saved for tenant {tenant_id}: {new_order['product']}")
         apply_stage_labels(bundle, sender_id, page_id, "ordered")
+
+    # ── صورة المنتج: تتبعت مرة واحدة لكل منتج (تقلل خطأ إرسال منتج غلط) ──
+    if matched_product and (matched_product.image_urls or "").strip():
+        if matched_product.product_key not in state.get("images_sent", []):
+            first_img = matched_product.image_urls.split(",")[0].strip()
+            if first_img:
+                time.sleep(0.4)
+                if send_image(bundle, sender_id, first_img, page_id, platform):
+                    state.setdefault("images_sent", []).append(matched_product.product_key)
+                    print(f"🖼️ Product image sent: {matched_product.product_key}")
 
     if matched_product and matched_product.product_link:
         if matched_product.product_key not in state.get("links_sent", []):

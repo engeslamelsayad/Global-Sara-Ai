@@ -31,6 +31,9 @@
     <label>مفتاح EasyOrders API</label>
     <input type="text" id="eo-api-key" placeholder="الصق مفتاح الـ API هنا"
            style="margin-bottom:12px; font-family:monospace">
+    <label>رابط متجرك <span style="font-weight:400; color:#94a3b8; font-size:12px">(عشان نضيف رابط كل منتج تلقائياً)</span></label>
+    <input type="url" id="eo-store-url" placeholder="https://www.your-store.com"
+           style="margin-bottom:12px">
     <button class="btn-ai" onclick="scanEasyOrders()" id="eo-scan-btn"
             style="background:linear-gradient(135deg,#10b981,#059669)">🟢 استورد من EasyOrders</button>
 
@@ -122,7 +125,7 @@ async function scanEasyOrders(){
   try {
     const res = await fetch("{{ url_for('dashboard.products_import_easyorders') }}", {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({api_key: apiKey})
+      body: JSON.stringify({api_key: apiKey, store_url: document.getElementById('eo-store-url').value.trim()})
     });
     const data = await res.json();
     document.getElementById('scan-status').style.display = 'none';

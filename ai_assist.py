@@ -302,7 +302,10 @@ def enrich_products_batch(products, business_description="", dialect="مصري")
 }}
 مهم: رجّع كل المنتجات بنفس الـ index بتاعها."""
 
-    result = _ask_json(prompt, max_tokens=4000)
+    result = _ask_json(prompt, max_tokens=8000)
+    if result.get("error"):
+        # رد الـ AI اتقطع أو مش JSON صالح — نرمي exception عشان الـ caller يعيد المحاولة
+        raise ValueError(f"AI enrichment parse failed: {result.get('error')}")
     enriched_map = {}
     for item in result.get("products", []):
         idx = item.get("index")

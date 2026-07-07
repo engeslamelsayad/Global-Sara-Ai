@@ -22,6 +22,12 @@ import ai_assist
 
 import json as _json
 
+def _clean_form(value):
+    """ينظّف قيمة الفورم — يشيل 'None' اللي اتسجّلت غلط من bug العرض القديم"""
+    v = (value or "").strip()
+    return "" if v in ("None", "none", "null") else v
+
+
 def _parse_features(raw):
     """يحوّل نص أسطر لـ JSON list من المميزات"""
     items = [l.strip().lstrip("•-").strip() for l in raw.split("\n") if l.strip()]
@@ -119,10 +125,11 @@ def products_import_easyorders():
     """يستورد المنتجات من EasyOrders عبر الـ API Key الرسمي"""
     import store_importer
     api_key = (request.json.get("api_key") or "").strip()
+    store_url = (request.json.get("store_url") or "").strip()
     if not api_key:
         return jsonify({"error": "مفتاح الـ API فارغ"}), 400
 
-    result = store_importer.import_from_easyorders_api(api_key)
+    result = store_importer.import_from_easyorders_api(api_key, store_url=store_url)
     if result["error"]:
         return jsonify({"error": result["error"]}), 400
 
@@ -218,13 +225,26 @@ def products_import_enrich():
     biz_desc = bc.business_description if bc and hasattr(bc, "business_description") else ""
 
     enriched = []
-    BATCH = 5
-    try:
-        for i in range(0, len(products), BATCH):
-            batch = products[i:i + BATCH]
-            enriched.extend(ai_assist.enrich_products_batch(batch, biz_desc, dialect))
-    except Exception as e:
-        return jsonify({"error": f"فشل الإثراء: {str(e)[:100]}"}), 500
+    failed_batches = 0
+    BATCH = 3   # دفعات صغيرة = رد أقصر = مفيش قطع في الـ JSON
+    for i in range(0, len(products), BATCH):
+        batch = products[i:i + BATCH]
+        done = None
+        for attempt in (1, 2):   # محاولتين لكل دفعة
+            try:
+                done = ai_assist.enrich_products_batch(batch, biz_desc, dialect)
+                break
+            except Exception as e:
+                print(f"⚠️ Enrich batch {i//BATCH+1} attempt {attempt} failed: {str(e)[:80]}")
+        if done:
+            enriched.extend(done)
+        else:
+            # الدفعة فشلت مرتين — نكمل بالبيانات الأساسية بدل ما نوقف الاستيراد
+            failed_batches += 1
+            enriched.extend(batch)
+
+    if failed_batches:
+        print(f"⚠️ Enrichment: {failed_batches} دفعة فشلت — منتجاتها اتستوردت بدون إثراء")
 
     return jsonify({"products": enriched, "count": len(enriched)})
 
@@ -246,15 +266,16 @@ def product_new():
             shipping_fee=request.form.get("shipping_fee") or 0,
             price_note=request.form.get("price_note", "").strip(),
             product_link=request.form.get("product_link", "").strip(),
+            image_urls=request.form.get("image_urls", "").strip(),
             sensitive_area_safe=bool(request.form.get("sensitive_area_safe")),
-            sensitive_area_note=request.form.get("sensitive_area_note", "").strip(),
+            sensitive_area_note=_clean_form(request.form.get("sensitive_area_note")),
             # الحقول الجديدة
             features=_parse_features(request.form.get("features", "")),
-            who_benefits=request.form.get("who_benefits", "").strip(),
-            results_timeline=request.form.get("results_timeline", "").strip(),
+            who_benefits=_clean_form(request.form.get("who_benefits")),
+            results_timeline=_clean_form(request.form.get("results_timeline")),
             faq=_parse_faq(request.form.get("faq", "")),
-            cross_selling=request.form.get("cross_selling", "").strip(),
-            closing_pitch=request.form.get("closing_pitch", "").strip(),
+            cross_selling=_clean_form(request.form.get("cross_selling")),
+            closing_pitch=_clean_form(request.form.get("closing_pitch")),
         )
         db.session.add(product)
         db.session.commit()
@@ -282,14 +303,15 @@ def product_edit(product_id):
         product.shipping_fee  = request.form.get("shipping_fee") or 0
         product.price_note    = request.form.get("price_note", "").strip()
         product.product_link  = request.form.get("product_link", "").strip()
+        product.image_urls    = request.form.get("image_urls", "").strip()
         product.sensitive_area_safe = bool(request.form.get("sensitive_area_safe"))
-        product.sensitive_area_note = request.form.get("sensitive_area_note", "").strip()
+        product.sensitive_area_note = _clean_form(request.form.get("sensitive_area_note"))
         product.features         = _parse_features(request.form.get("features", ""))
-        product.who_benefits     = request.form.get("who_benefits", "").strip()
-        product.results_timeline = request.form.get("results_timeline", "").strip()
+        product.who_benefits     = _clean_form(request.form.get("who_benefits"))
+        product.results_timeline = _clean_form(request.form.get("results_timeline"))
         product.faq              = _parse_faq(request.form.get("faq", ""))
-        product.cross_selling    = request.form.get("cross_selling", "").strip()
-        product.closing_pitch    = request.form.get("closing_pitch", "").strip()
+        product.cross_selling    = _clean_form(request.form.get("cross_selling"))
+        product.closing_pitch    = _clean_form(request.form.get("closing_pitch"))
         product.is_active        = bool(request.form.get("is_active"))
         db.session.commit()
         _invalidate(tenant)

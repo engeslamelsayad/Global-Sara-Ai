@@ -122,7 +122,7 @@ def _extract_eo_prices(p):
     return sale, original
 
 
-def import_from_easyorders_api(api_key, max_products=500):
+def import_from_easyorders_api(api_key, max_products=500, store_url=""):
     """
     استيراد المنتجات من EasyOrders عبر الـ API الرسمي (بالـ API Key).
     ده الحل المضمون لمتاجر EasyOrders — بيجيب كل المنتجات بدقة.
@@ -210,6 +210,13 @@ def import_from_easyorders_api(api_key, max_products=500):
                 price_note = f"{sale:.0f} ج بدل {original:.0f} ج" + (" — شامل الشحن" if is_free else "")
 
         slug = p.get("slug", "")
+        # رابط المنتج: لو التاجر دخّل رابط متجره، نبنيه من الـ slug
+        product_link = ""
+        if store_url and slug:
+            base = store_url.rstrip("/")
+            if not base.startswith(("http://", "https://")):
+                base = "https://" + base
+            product_link = f"{base}/products/{slug}"
         products.append({
             "name": name,
             "description": desc,
@@ -218,7 +225,7 @@ def import_from_easyorders_api(api_key, max_products=500):
             "price_original": original if (sale and original and sale < original) else None,
             "price_note": price_note,
             "features": "",
-            "product_link": "",   # الـ API مابيرجعش رابط الصفحة مباشرة
+            "product_link": product_link,
             "image_urls": ",".join(images[:3]),
             "is_free_shipping": is_free,
             "easyorders_slug": slug,
