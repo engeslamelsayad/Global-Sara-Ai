@@ -16,6 +16,18 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-in-production")
 
 init_db(app)
+
+# ── Migrations تلقائية عند كل إقلاع ──────────────────────────────
+# آمنة تماماً: كل ALTER بيتخطى لو العمود موجود (idempotent).
+# دي بتمنع مشكلة "الكود اترفع قبل الـ migration" اللي كانت بتوقع الداشبورد.
+try:
+    import migrate_add_columns
+    print("🔧 Auto-migrations: فحص أعمدة قاعدة البيانات...")
+    migrate_add_columns.run(app)
+except Exception as _mig_err:
+    # فشل الـ migration مايمنعش التطبيق من الإقلاع — بس نسجّله بوضوح
+    print(f"⚠️ Auto-migration error (التطبيق هيكمل): {_mig_err}")
+
 login_manager.init_app(app)
 
 app.register_blueprint(webhook_bp)

@@ -377,6 +377,27 @@ def product_delete(product_id):
     return redirect(url_for("dashboard.products_list"))
 
 
+@dashboard_bp.route("/products/bulk-delete", methods=["POST"])
+@login_required_dashboard
+def products_bulk_delete():
+    """حذف جماعي لمنتجات محددة — آمن ضد حذف منتجات tenant تاني"""
+    tenant = _current_tenant()
+    ids = (request.get_json(silent=True) or {}).get("ids", [])
+    if not ids or not isinstance(ids, list):
+        return jsonify({"error": "لم يتم تحديد منتجات"}), 400
+    if len(ids) > 500:
+        return jsonify({"error": "عدد كبير جداً"}), 400
+
+    # الفلترة بـ tenant_id إجبارية — مايقدرش يحذف منتجات حساب تاني
+    deleted = (Product.query
+               .filter(Product.tenant_id == tenant.id, Product.id.in_(ids))
+               .delete(synchronize_session=False))
+    db.session.commit()
+    _invalidate(tenant)
+    print(f"🗑 Bulk delete: {deleted} منتج ({tenant.slug})")
+    return jsonify({"deleted": deleted})
+
+
 @dashboard_bp.route("/products/ai-suggest", methods=["POST"])
 @login_required_dashboard
 def product_ai_suggest():

@@ -12,13 +12,32 @@
   </div>
 </div>
 
+<!-- شريط الحذف الجماعي — بيظهر لما تختار منتجات -->
+<div id="bulk-bar" style="display:none; position:sticky; top:8px; z-index:50;
+     background:#FEF2F2; border:2px solid #ef4444; border-radius:12px;
+     padding:10px 16px; margin-bottom:12px; align-items:center; gap:12px">
+  <strong style="color:#dc2626">تم اختيار <span id="sel-count">0</span> منتج</strong>
+  <button class="btn btn-danger btn-sm" onclick="bulkDelete()" id="bulk-del-btn">🗑 حذف المحدد</button>
+  <button class="btn btn-secondary btn-sm" onclick="clearSelection()">إلغاء التحديد</button>
+</div>
+
 <div class="card" style="padding:0; overflow:hidden">
   {% if products %}
   <table>
-    <thead><tr><th>الاسم</th><th>السعر</th><th>الحالة</th><th></th></tr></thead>
+    <thead><tr>
+      <th style="width:36px; text-align:center">
+        <input type="checkbox" id="check-all" onchange="toggleAll(this)"
+               style="width:17px; height:17px; cursor:pointer" title="تحديد الكل">
+      </th>
+      <th>الاسم</th><th>السعر</th><th>الحالة</th><th></th>
+    </tr></thead>
     <tbody>
       {% for p in products %}
       <tr>
+        <td style="text-align:center">
+          <input type="checkbox" class="prod-check" value="{{ p.id }}"
+                 onchange="updateBar()" style="width:17px; height:17px; cursor:pointer">
+        </td>
         <td>
           <strong>{{ p.name }}</strong><br>
           <span style="color:var(--text-soft); font-size:12px">{{ p.product_key }}</span>
@@ -48,4 +67,51 @@
   </div>
   {% endif %}
 </div>
+
+<script>
+function checks(){ return [...document.querySelectorAll('.prod-check')]; }
+function selected(){ return checks().filter(c => c.checked).map(c => c.value); }
+
+function updateBar(){
+  const n = selected().length;
+  document.getElementById('sel-count').textContent = n;
+  document.getElementById('bulk-bar').style.display = n ? 'flex' : 'none';
+  const all = document.getElementById('check-all');
+  all.checked = n > 0 && n === checks().length;
+  all.indeterminate = n > 0 && n < checks().length;
+}
+
+function toggleAll(master){
+  checks().forEach(c => c.checked = master.checked);
+  updateBar();
+}
+
+function clearSelection(){
+  checks().forEach(c => c.checked = false);
+  document.getElementById('check-all').checked = false;
+  updateBar();
+}
+
+async function bulkDelete(){
+  const ids = selected();
+  if(!ids.length) return;
+  if(!confirm(`متأكد من حذف ${ids.length} منتج؟ الحذف نهائي ومش ممكن التراجع عنه.`)) return;
+
+  const btn = document.getElementById('bulk-del-btn');
+  btn.disabled = true; btn.textContent = '⏳ جاري الحذف...';
+  try {
+    const res = await fetch("{{ url_for('dashboard.products_bulk_delete') }}", {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ids})
+    });
+    const data = await res.json();
+    if(data.error){ alert(data.error); btn.disabled=false; btn.textContent='🗑 حذف المحدد'; return; }
+    location.reload();
+  } catch(e){
+    alert('حصل خطأ، حاول تاني');
+    btn.disabled = false; btn.textContent = '🗑 حذف المحدد';
+  }
+}
+</script>
 {% endblock %}
