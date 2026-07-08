@@ -134,6 +134,53 @@ def get_tenant_analytics(tenant):
     # ترتيب: الأعلى محادثات أولاً (الأهم للمراجعة)
     ads_performance.sort(key=lambda a: a["convos"], reverse=True)
 
+    # ══ رؤى المنتجات — أداء واعتراضات كل منتج ═══════════════
+    # بدل قراءة مئات المحادثات: لكل منتج، كام عميل اهتم، كام اعترض وعلى إيه،
+    # كام طلب فعلاً — بنسب واضحة
+    key_to_name = {p.product_key: p.name for p in tenant_products}
+    product_insights = {}
+
+    def _pi(key):
+        if key not in product_insights:
+            product_insights[key] = {
+                "key": key,
+                "name": key_to_name.get(key, key),
+                "asked": 0,          # محادثات سألت عن المنتج
+                "orders": 0,         # منها انتهت بطلب
+                "interested_now": 0, # حالياً في مرحلة اهتمام (فرصة متابعة)
+                "objecting_now": 0,  # حالياً معترضين
+                "expensive": 0,      # اعتراضات "غالي"
+                "unsure": 0,         # اعتراضات "مش متأكد"
+                "later": 0,          # اعتراضات "بعدين/هفكر"
+            }
+        return product_insights[key]
+
+    for s in states:
+        if s.get("platform") == "demo":
+            continue
+        asked = set(s.get("products_asked", []))
+        for key in asked:
+            rec = _pi(key)
+            rec["asked"] += 1
+            if s.get("has_order"):
+                rec["orders"] += 1
+            stage = s.get("stage", "")
+            if stage in ("INTERESTED", "INQUIRY") and not s.get("has_order"):
+                rec["interested_now"] += 1
+            elif stage == "OBJECTION" and not s.get("has_order"):
+                rec["objecting_now"] += 1
+        # الاعتراضات بالنوع (متسجلة لكل منتج وقت حدوثها)
+        for key, types in (s.get("objections_by_product") or {}).items():
+            rec = _pi(key)
+            rec["expensive"] += types.get("expensive", 0)
+            rec["unsure"]    += types.get("unsure", 0)
+            rec["later"]     += types.get("later", 0)
+
+    product_insights_list = sorted(
+        product_insights.values(), key=lambda r: r["asked"], reverse=True)
+    for r in product_insights_list:
+        r["conversion"] = (r["orders"] / r["asked"] * 100) if r["asked"] else 0
+
     return {
         "total_conversations": total_conversations,
         "active_last_hour": active_last_hour,
@@ -154,6 +201,7 @@ def get_tenant_analytics(tenant):
         "recent_orders": all_orders[:15],
         "lost_opportunities": lost,   # ⭐ الفرص الضايعة
         "ads_performance": ads_performance,   # ⭐ أداء الإعلانات
+        "product_insights": product_insights_list,   # ⭐ رؤى المنتجات
         "updated_at": now.strftime("%Y-%m-%d %H:%M UTC"),
     }
 
@@ -339,6 +387,60 @@ def build_analytics_html(tenant, data):
   </p>
 </div>"""
 
+    # ── HTML رؤى المنتجات ──
+    pins = data.get("product_insights", [])
+    if pins:
+        def _chip(n, color, label):
+            if not n:
+                return f'<span style="color:#CBD5E1;font-size:12px">{label}: 0</span>'
+            return (f'<span style="background:{color}18;color:{color};border:1px solid {color}40;'
+                    f'border-radius:8px;padding:2px 8px;font-size:12px;font-weight:700">'
+                    f'{label}: {n}</span>')
+
+        pi_rows = ""
+        for r in pins[:25]:
+            conv_color = "#10b981" if r["conversion"] >= 20 else ("#f97316" if r["conversion"] >= 8 else "#ef4444")
+            total_obj = r["expensive"] + r["unsure"] + r["later"]
+            # نسبة كل اعتراض من إجمالي اللي سألوا
+            def pct(n):
+                return f" ({n/r['asked']*100:.0f}%)" if r["asked"] and n else ""
+            pi_rows += f"""
+<div style="border:1px solid #E2E8F0;border-radius:12px;padding:14px;margin-bottom:10px">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+    <strong style="font-size:14px">{r['name'][:45]}</strong>
+    <span style="font-size:13px;color:#475569">
+      سألوا عنه <b>{r['asked']}</b> · طلبوا <b style="color:#10b981">{r['orders']}</b> ·
+      تحويل <b style="color:{conv_color}">{r['conversion']:.0f}%</b>
+    </span>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+    {_chip(r['expensive'], '#ef4444', '💰 غالي' + pct(r['expensive']))}
+    {_chip(r['unsure'], '#f97316', '🤔 مش متأكد' + pct(r['unsure']))}
+    {_chip(r['later'], '#eab308', '⏳ بعدين' + pct(r['later']))}
+    {_chip(r['interested_now'], '#3b82f6', '❤️ مهتمين حالياً')}
+    {_chip(r['objecting_now'], '#8b5cf6', '⚠️ معترضين حالياً')}
+  </div>
+</div>"""
+
+        product_insights_html = f"""
+<div class="sec" style="border:2px solid #0ea5e9">
+  <h3>🔬 رؤى المنتجات — أداء واعتراضات كل منتج</h3>
+  <p style="font-size:12px;color:#94a3b8;margin:0 0 12px">
+    بدل ما تقرا مئات المحادثات: كل منتج وكام عميل اهتم بيه، اعترض على إيه بالظبط، وكام طلب فعلاً.
+    التحويل الأخضر ≥20% ممتاز · البرتقالي 8-20% متوسط · الأحمر أقل من 8% محتاج مراجعة.
+  </p>
+  {pi_rows}
+</div>"""
+    else:
+        product_insights_html = """
+<div class="sec" style="border:2px solid #0ea5e9">
+  <h3>🔬 رؤى المنتجات — أداء واعتراضات كل منتج</h3>
+  <p style="font-size:13px;color:#64748b;margin:0">
+    لسه مفيش بيانات — القسم بيتملأ تلقائياً مع أول محادثات العملاء.
+    هتشوف هنا لكل منتج: كام عميل سأل عنه، كام اعترض (غالي/مش متأكد/بعدين)، وكام طلب فعلاً — بنسب واضحة.
+  </p>
+</div>"""
+
     return f"""<!DOCTYPE html><html dir="rtl" lang="ar">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{tenant.business_name} — Analytics</title><style>{_CSS}</style>
@@ -362,6 +464,7 @@ def build_analytics_html(tenant, data):
   <h3>💸 الفرص الضايعة — فين بتخسر مبيعات</h3>
   {lost_html}
 </div>
+{product_insights_html}
 {ads_html}
 
 <div class="sec"><h3>📬 Follow-up Stats</h3>

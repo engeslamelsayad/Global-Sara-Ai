@@ -129,6 +129,42 @@ def run(flask_app=None):
         else:
             print("  ⏭  SQLite: meta_labels ستُنشأ بـ db.create_all() تلقائياً")
 
+        print("\n=== 5. كلمات الاعتراضات (backfill للـ tenants الموجودين) ===")
+        # الاعتراضات (غالي/مش متأكد/بعدين) بتغذي: رصد الاعتراض بالنوع
+        # + العروض الديناميكية + رؤى المنتجات. بنضيفها لأي tenant ناقصها.
+        try:
+            from models import Tenant, Keyword
+            OBJECTION_KEYWORDS = {
+                "objection_expensive": ["غالي", "غاليه", "غالى", "كتير عليا", "كتير أوي",
+                                        "مبالغ", "سعره كبير", "مش قد كده", "في أرخص",
+                                        "فيه أرخص", "ارخص", "تخفيض", "خصم"],
+                "objection_unsure":    ["مش متأكد", "مش متاكد", "مش واثق", "خايف",
+                                        "قلقان", "هل بجد", "بجد بيجيب نتيجة", "مضمون",
+                                        "نصاب", "نصب", "مش مقتنع", "محتار", "محتارة"],
+                "objection_later":     ["بعدين", "هفكر", "افكر", "أفكر", "لما أشوف",
+                                        "مش دلوقتي", "لسه", "هرجع لك", "هرجعلك",
+                                        "أستأذن", "هشوف وأرد", "مش وقته"],
+            }
+            added_total = 0
+            for tenant in Tenant.query.all():
+                existing = {(k.category, k.value) for k in
+                            Keyword.query.filter_by(tenant_id=tenant.id).all()}
+                for cat, kws in OBJECTION_KEYWORDS.items():
+                    for kw in kws:
+                        if (cat, kw) not in existing:
+                            db.session.add(Keyword(tenant_id=tenant.id,
+                                                   category=cat, value=kw))
+                            added_total += 1
+            if added_total:
+                db.session.commit()
+                print(f"  ✅ اتضاف {added_total} كلمة اعتراض للـ tenants الموجودين")
+            else:
+                print("  ⏭  كلمات الاعتراضات موجودة بالفعل")
+        except Exception as e:
+            db.session.rollback()
+            print(f"  ⚠️ objection keywords backfill: {e}")
+            ok_all = False
+
         # مفيش conn.commit() هنا — كل أمر بيعمل commit لوحده في safe_alter
         conn.close()
 

@@ -618,11 +618,29 @@ def get_ai_response(bundle, sender_id, user_message, state,
     elif state["stage"] == "NEW":
         state["stage"] = "INQUIRY"
 
-    if matches_category(user_message, keywords, "objection_expensive") or \
-       matches_category(user_message, keywords, "objection_unsure") or \
-       matches_category(user_message, keywords, "objection_later"):
+    # ── تتبع الاعتراضات بالنوع ولكل منتج (للتحليلات) ──
+    _obj_types = []
+    if matches_category(user_message, keywords, "objection_expensive"):
+        _obj_types.append("expensive")
+    if matches_category(user_message, keywords, "objection_unsure"):
+        _obj_types.append("unsure")
+    if matches_category(user_message, keywords, "objection_later"):
+        _obj_types.append("later")
+
+    if _obj_types:
         state["stage"] = "OBJECTION"
         state["objections_count"] = state.get("objections_count", 0) + 1
+        # ننسب الاعتراض للمنتج الحالي (المطابق أو آخر منتج اتسأل عنه)
+        _pk = None
+        if matched_product:
+            _pk = matched_product.product_key
+        elif state.get("products_asked"):
+            _pk = state["products_asked"][-1]
+        if _pk:
+            _obp = state.setdefault("objections_by_product", {})
+            _rec = _obp.setdefault(_pk, {})
+            for _t in _obj_types:
+                _rec[_t] = _rec.get(_t, 0) + 1
 
     # العروض الديناميكية: لو الشروط تحققت في الرد ده، نعلّم إن العرض اتقدّم
     # (عشان مايتكررش في كل رسالة)
