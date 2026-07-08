@@ -165,6 +165,43 @@ def run(flask_app=None):
             print(f"  ⚠️ objection keywords backfill: {e}")
             ok_all = False
 
+        print("\n=== 6. ترقية سلّم المتابعات لـ 4 مراحل ===")
+        # الـ tenants القدام عندهم مرحلتين (24h + 12h خصم). نرقّيهم لسلّم الـ 4
+        # مراحل الديناميكي (6/24/24+خصم/48+خصم) — بس لو لسه ماترقّوش.
+        try:
+            from models import Tenant, FollowupStage
+            _target = [(1, 6, 0), (2, 24, 0), (3, 24, 10), (4, 48, 10)]
+            upgraded = 0
+            for tenant in Tenant.query.all():
+                existing = FollowupStage.query.filter_by(tenant_id=tenant.id).all()
+                # نرقّي بس لو عنده أقل من 4 مراحل (السلّم القديم أو ناقص)
+                if len(existing) >= 4:
+                    continue
+                have_nums = {s.stage_number for s in existing}
+                for num, hrs, disc in _target:
+                    if num in have_nums:
+                        continue
+                    db.session.add(FollowupStage(
+                        tenant_id=tenant.id, stage_number=num,
+                        hours_after_last=hrs, message_text="", discount_percent=disc,
+                    ))
+                    upgraded += 1
+                # نصلّح توقيت المرحلتين القديمتين لو مختلف (24→6 للأولى)
+                for s in existing:
+                    for num, hrs, disc in _target:
+                        if s.stage_number == num and s.hours_after_last != hrs:
+                            s.hours_after_last = hrs
+                            s.discount_percent = disc
+            if upgraded:
+                db.session.commit()
+                print(f"  ✅ اتضاف {upgraded} مرحلة متابعة (ترقية للسلّم الديناميكي)")
+            else:
+                print("  ⏭  كل الـ tenants عندهم السلّم الكامل بالفعل")
+        except Exception as e:
+            db.session.rollback()
+            print(f"  ⚠️ followup stages upgrade: {e}")
+            ok_all = False
+
         # مفيش conn.commit() هنا — كل أمر بيعمل commit لوحده في safe_alter
         conn.close()
 

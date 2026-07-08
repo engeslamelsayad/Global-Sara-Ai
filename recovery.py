@@ -34,11 +34,25 @@ def _build_smart_message(stage_row, state, product):
     """
     base = (stage_row.message_text or "").strip()
     discount = stage_row.discount_percent or 0
-    reason = state.get("stage", "")
     pname = product.name if product else ""
+
+    # سبب التوقف بالأولوية: شاف السعر وسكت ← اعترض ← مهتم/بيسأل
+    price_silent = (state.get("price_quoted")
+                    and state.get("last_message", 0) <= state.get("price_quoted_time", 0))
+    reason = "PRICE_SILENT" if price_silent else state.get("stage", "")
 
     # استبدال الـ placeholders لو التاجر مستخدمها
     msg = base.replace("{product}", pname).replace("{discount}", str(discount))
+
+    # ── شاف السعر وسكت: أخطر شريحة — رسالة تطمين عن السعر ──
+    if reason == "PRICE_SILENT":
+        pref = f"«{pname}»" if pname else "المنتج"
+        smart = (f"أهلاً يا فندم 😊 حسيت إن السعر ممكن يكون محتاج تفكير — ده طبيعي جداً. "
+                 f"بس افتكر إن الدفع عند الاستلام، يعني بتشوف {pref} بعينك الأول "
+                 f"ومفيش أي مخاطرة عليك.")
+        if discount > 0:
+            smart += f"\nوعشان خاطرك، عندي خصم {discount}% لو أكدت طلبك النهاردة 🎁"
+        return msg if (len(base) > 20 and "{" not in base) else smart
 
     # التخصيص الذكي حسب السبب — لو النص الأساسي مافيهوش تخصيص
     if reason == "OBJECTION":

@@ -658,6 +658,36 @@ def get_ai_response(bundle, sender_id, user_message, state,
 
     response_text = response_text.replace("**", "").replace("*", "")
 
+    # ── تتبع لحظة ذكر السعر (لرصد "شاف السعر وسكت") ──
+    import time as _t
+    import re as _re
+    state["last_bot_reply_time"] = _t.time()
+    if not state.get("price_quoted"):
+        _resp_nums = set(_re.findall(r"\d{3,}", response_text))
+        if _resp_nums:
+            _hit = None
+            # الأولوية: المنتج المطابق ← آخر منتجات سأل عنها ← أي منتج بسعر معروف
+            _cands = []
+            if matched_product:
+                _cands.append(matched_product)
+            _asked_keys = list(reversed(state.get("products_asked", [])))
+            for _k in _asked_keys:
+                _p = next((p for p in products if p.product_key == _k), None)
+                if _p:
+                    _cands.append(_p)
+            _cands += [p for p in products if p.price_note or p.price_amount]
+            for _p in _cands:
+                _ps = _p.price_note or (f"{_p.price_amount}" if _p.price_amount else "")
+                _num = _re.search(r"\d{3,}", _ps or "")
+                if _num and _num.group(0) in _resp_nums:
+                    _hit = _p.product_key
+                    break
+            if _hit:
+                state["price_quoted"]         = True
+                state["price_quoted_time"]    = _t.time()
+                state["price_quoted_product"] = _hit
+                print(f"💰 Price quoted ({_hit}) → {sender_id}")
+
     hist_text = f"[صورة] {user_message}".strip() if image_b64 else user_message
     state["history"] = (history + [
         {"role": "user", "content": hist_text},

@@ -296,29 +296,22 @@ def run_migration():
             db.session.add(BotAppId(tenant_id=tenant.id, app_id=app_id, label=label))
         print("✅ 2 bot app IDs registered")
 
-        # ── Followup Stages ──
-        db.session.add(FollowupStage(
-            tenant_id=tenant.id, stage_number=1, hours_after_last=24,
-            message_text=(
-                "أهلاً! 😊 سارة من EECM هنا.\n"
-                "شايفة إنك اتكلمنا من شوية وأنا مش عايزاك تفوّت الفرصة دي.\n"
-                "المنتج لسه متاح، التوصيل 1-3 أيام، والدفع عند الاستلام يعني مفيش أي مخاطرة.\n"
-                "إيه اللي خلاك/ي تتردد/ي؟ أنا هنا أجاوب أي سؤال 💙"
-            ),
-            discount_percent=0,
-        ))
-        db.session.add(FollowupStage(
-            tenant_id=tenant.id, stage_number=2, hours_after_last=12,   # +12h = 36h إجمالي
-            message_text=(
-                "أهلاً مجدداً! 🎁 سارة معاكي من EECM.\n"
-                "عشان مهتم/ة بجد بمنتجاتنا، عندي مفاجأة ليك:\n"
-                "لو طلبت دلوقتي هتاخد خصم 10% على طلبك ✅\n"
-                "بس الخصم ده مش هيفضل طويل!\n"
-                "الدفع عند الاستلام كالعادة. هتطلب دلوقتي؟ 😊"
-            ),
-            discount_percent=10,
-        ))
-        print("✅ 2 followup stages created (24h, +12h=36h total)")
+        # ── Followup Stages — سلّم 4 مراحل ديناميكي ──
+        # النصوص فاضية عمداً: recovery.py بيولّد رسالة ذكية حسب سبب توقف
+        # العميل (شاف السعر وسكت / اعترض / مهتم) + اسم المنتج. التاجر يقدر
+        # يكتب نص مخصص من الداشبورد لو حب (بيدعم {product} و {discount}).
+        _stages = [
+            (1, 6,  0),    # نكزة سريعة ودّية
+            (2, 24, 0),    # قيمة المنتج + معالجة السبب
+            (3, 24, 10),   # خصم إنقاذ البيعة
+            (4, 48, 10),   # آخر فرصة — العرض بينتهي
+        ]
+        for num, hrs, disc in _stages:
+            db.session.add(FollowupStage(
+                tenant_id=tenant.id, stage_number=num,
+                hours_after_last=hrs, message_text="", discount_percent=disc,
+            ))
+        print(f"✅ {len(_stages)} followup stages created (6h, 24h, 24h+خصم, 48h+خصم)")
 
         db.session.commit()
         print()

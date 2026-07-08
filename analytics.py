@@ -23,11 +23,20 @@ ANALYTICS_KEY = os.environ.get("ANALYTICS_KEY", "changeme")
 # =====================================================================
 # COMPUTE METRICS
 # =====================================================================
-def get_tenant_analytics(tenant):
+def get_tenant_analytics(tenant, date_from=None, date_to=None):
+    """
+    date_from / date_to: timestamps (ثواني) لفلترة الفترة. None = بلا حد.
+    الطلبات بتتفلتر بـ created_at (دقيق) والمحادثات بـ last_message.
+    """
     now = datetime.utcnow()
 
     # ── الطلبات: من الداتابيز مباشرة (مصدر الحقيقة) ──
-    all_orders = Order.query.filter_by(tenant_id=tenant.id).order_by(Order.created_at.desc()).all()
+    _oq = Order.query.filter_by(tenant_id=tenant.id)
+    if date_from:
+        _oq = _oq.filter(Order.created_at >= datetime.utcfromtimestamp(date_from))
+    if date_to:
+        _oq = _oq.filter(Order.created_at <= datetime.utcfromtimestamp(date_to))
+    all_orders = _oq.order_by(Order.created_at.desc()).all()
 
     orders_24h = [o for o in all_orders if (now - o.created_at) <= timedelta(hours=24)]
     orders_7d  = [o for o in all_orders if (now - o.created_at) <= timedelta(days=7)]
@@ -80,6 +89,16 @@ def get_tenant_analytics(tenant):
 
     # ── حالات المحادثات: من Redis (حالة لحظية) ──
     states = list_tenant_states(tenant.id)
+    # فلتر المحادثات حسب آخر نشاط (لو الفترة محددة)
+    if date_from or date_to:
+        def _in_range(s):
+            lm = s.get("last_message") or 0
+            if date_from and lm < date_from:
+                return False
+            if date_to and lm > date_to:
+                return False
+            return True
+        states = [s for s in states if _in_range(s)]
 
     total_conversations = len(states)
     active_last_hour = sum(
@@ -156,8 +175,19 @@ def get_tenant_analytics(tenant):
                 "expensive": 0,      # اعتراضات "غالي"
                 "unsure": 0,         # اعتراضات "مش متأكد"
                 "later": 0,          # اعتراضات "بعدين/هفكر"
+                "price_silent": 0,   # شافوا السعر وسكتوا
             }
         return product_insights[key]
+
+    import time as _time
+    _now_ts = _time.time()
+    # buckets الصمت (نقاط موت المحادثات)
+    silent_after_price = 0
+    silent_after_obj   = 0
+    silent_first_msg   = 0
+    silent_interested  = 0
+    price_quoted_total = 0
+    replied_after_price = 0
 
     for s in states:
         if s.get("platform") == "demo":
@@ -173,6 +203,29 @@ def get_tenant_analytics(tenant):
                 rec["interested_now"] += 1
             elif stage == "OBJECTION" and not s.get("has_order"):
                 rec["objecting_now"] += 1
+
+        # ── فين العملاء بيسكتوا؟ ──
+        if not s.get("has_order") and not s.get("is_human_handoff"):
+            if s.get("price_quoted"):
+                price_quoted_total += 1
+                if s.get("last_message", 0) > s.get("price_quoted_time", 0):
+                    replied_after_price += 1
+            _silent = (_now_ts - s.get("last_message", _now_ts)) >= 6 * 3600
+            _price_stuck = (s.get("price_quoted")
+                            and s.get("last_message", 0) <= s.get("price_quoted_time", 0))
+            if _silent:
+                if _price_stuck:
+                    silent_after_price += 1
+                    _pq = s.get("price_quoted_product")
+                    if _pq:
+                        _pi(_pq)["price_silent"] += 1
+                elif s.get("stage") == "OBJECTION":
+                    silent_after_obj += 1
+                elif len(s.get("history", [])) <= 2:
+                    silent_first_msg += 1
+                elif s.get("stage") in ("INTERESTED", "INQUIRY"):
+                    silent_interested += 1
+
         # الاعتراضات بالنوع (متسجلة لكل منتج وقت حدوثها)
         for key, types in (s.get("objections_by_product") or {}).items():
             rec = _pi(key)
@@ -206,7 +259,19 @@ def get_tenant_analytics(tenant):
         "lost_opportunities": lost,   # ⭐ الفرص الضايعة
         "ads_performance": ads_performance,   # ⭐ أداء الإعلانات
         "product_insights": product_insights_list,   # ⭐ رؤى المنتجات
+        "silence": {   # ⭐ فين العملاء بيسكتوا
+            "after_price": silent_after_price,
+            "after_obj": silent_after_obj,
+            "first_msg": silent_first_msg,
+            "interested": silent_interested,
+            "price_reply_rate": round(replied_after_price / price_quoted_total * 100, 0) if price_quoted_total else 0,
+        },
         "updated_at": now.strftime("%Y-%m-%d %H:%M UTC"),
+        "_filter": {
+            "from": date_from, "to": date_to,
+            "active": bool(date_from or date_to),
+            "n_states": len(states),
+        },
     }
 
 
@@ -422,6 +487,7 @@ def build_analytics_html(tenant, data):
     {_chip(r['unsure'], '#f97316', '🤔 مش متأكد' + pct(r['unsure']))}
     {_chip(r['later'], '#eab308', '⏳ بعدين' + pct(r['later']))}
     {_chip(r['interested_now'], '#3b82f6', '❤️ مهتمين حالياً')}
+    {_chip(r['price_silent'], '#f43f5e', '💸 شافوا السعر وسكتوا')}
     {_chip(r['objecting_now'], '#8b5cf6', '⚠️ معترضين حالياً')}
   </div>
 </div>"""
@@ -445,12 +511,73 @@ def build_analytics_html(tenant, data):
   </p>
 </div>"""
 
+    # ── HTML فين العملاء بيسكتوا ──
+    sil = data.get("silence", {})
+    silence_html = f"""
+<div class="sec" style="border:2px solid #f43f5e">
+  <h3>🔇 فين العملاء بيسكتوا؟ — نقاط موت المحادثات</h3>
+  <p style="font-size:12px;color:#94a3b8;margin:0 0 12px">
+    محادثات صامتة 6+ ساعات بدون طلب — مقسّمة حسب آخر محطة قبل الصمت.
+    نسبة الرد بعد سماع السعر مؤشر مباشر على قوة عرض السعر.
+  </p>
+  <div class="grid">
+    <div class="card" style="border:2px solid #f43f5e"><h2>💸 شافوا السعر وسكتوا</h2><div class="num" style="color:#f43f5e">{sil.get('after_price', 0)}</div></div>
+    <div class="card"><h2>⚠️ اعترضوا وسكتوا</h2><div class="num" style="color:#8b5cf6">{sil.get('after_obj', 0)}</div></div>
+    <div class="card"><h2>👋 سألوا سؤال وسكتوا</h2><div class="num" style="color:#eab308">{sil.get('first_msg', 0)}</div></div>
+    <div class="card"><h2>❤️ كانوا مهتمين وسكتوا</h2><div class="num" style="color:#3b82f6">{sil.get('interested', 0)}</div></div>
+    <div class="card" style="border:2px solid #10b981"><h2>📈 نسبة الرد بعد سماع السعر</h2><div class="num green">{sil.get('price_reply_rate', 0):.0f}%</div></div>
+  </div>
+</div>"""
+
+    # ── شريط فلتر التاريخ ──
+    from datetime import datetime as _dt
+    _flt = data.get("_filter", {})
+    _df, _dt_ts = _flt.get("from"), _flt.get("to")
+    _range_key = data.get("_range_key", "all")
+    _df_val = _dt.fromtimestamp(_df).strftime("%Y-%m-%d") if _df else ""
+    _to_val = _dt.fromtimestamp(_dt_ts).strftime("%Y-%m-%d") if _dt_ts else ""
+    _slug = tenant.slug
+    _key = data.get("_akey", "")
+    # لو الدخول بالجلسة (مش بـ key)، الروابط تشتغل من غير key
+    _key_param = f"key={_key}&" if _key else ""
+    def _bcls(k):
+        return "background:#7c3aed;color:#fff" if _range_key == k else "background:#1e293b;color:#94a3b8"
+    _scope_note = ""
+    if _flt.get("active"):
+        _rng = []
+        if _df_val: _rng.append(f"من {_df_val}")
+        if _to_val: _rng.append(f"إلى {_to_val}")
+        _scope_note = (f'<div style="text-align:center;color:#a78bfa;font-size:13px;margin:8px 0">'
+                       f'🔍 عرض <b>{_flt.get("n_states",0)}</b> محادثة نشطة {" ".join(_rng)} — '
+                       f'كل الأرقام تحت بتعكس الفترة دي (الطلبات مؤرّخة بدقة)</div>')
+    _base = f"/analytics/{_slug}?{_key_param}"
+    filter_bar = f"""
+<div style="background:#0f172a;border:1px solid #334155;border-radius:12px;padding:14px;margin-bottom:16px">
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:center">
+    <span style="color:#e2e8f0;font-weight:700;font-size:14px">📅 الفترة:</span>
+    <a href="{_base}range=today" style="{_bcls('today')};padding:6px 16px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:700">اليوم</a>
+    <a href="{_base}range=7d" style="{_bcls('7d')};padding:6px 16px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:700">آخر 7 أيام</a>
+    <a href="{_base}range=30d" style="{_bcls('30d')};padding:6px 16px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:700">آخر 30 يوم</a>
+    <a href="{_base}range=all" style="{_bcls('all')};padding:6px 16px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:700">الكل</a>
+    <span style="color:#475569;margin:0 4px">|</span>
+    <form method="get" action="/analytics/{_slug}" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+      {'<input type="hidden" name="key" value="' + _key + '">' if _key else ''}
+      <input type="date" name="from" value="{_df_val}" style="background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:5px 8px;font-size:13px">
+      <span style="color:#94a3b8">←</span>
+      <input type="date" name="to" value="{_to_val}" style="background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:5px 8px;font-size:13px">
+      <button type="submit" style="background:#10b981;color:#fff;border:none;border-radius:6px;padding:6px 16px;font-size:13px;font-weight:700;cursor:pointer">تطبيق</button>
+    </form>
+  </div>
+  {_scope_note}
+</div>"""
+
     return f"""<!DOCTYPE html><html dir="rtl" lang="ar">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{tenant.business_name} — Analytics</title><style>{_CSS}</style>
 <script>setTimeout(()=>location.reload(), 60000)</script>
 </head><body>
 <h1>📊 لوحة تحليلات {tenant.business_name}</h1>
+{filter_bar}
 
 <div class="grid">
   <div class="card"><h2>طلبات آخر 24 ساعة</h2><div class="num green">{data['orders_last_24h']}</div></div>
@@ -468,7 +595,7 @@ def build_analytics_html(tenant, data):
   <h3>💸 الفرص الضايعة — فين بتخسر مبيعات</h3>
   {lost_html}
 </div>
-{product_insights_html}
+{silence_html}
 {ads_html}
 
 <div class="sec"><h3>📬 Follow-up Stats</h3>
@@ -522,5 +649,35 @@ def tenant_analytics(tenant_slug):
     if not tenant:
         return f"Tenant '{tenant_slug}' not found", 404
 
-    data = get_tenant_analytics(tenant)
+    # ── تحديد الفترة ──
+    import time as _time
+    now = _time.time()
+    range_key = request.args.get("range", "")
+    from_str  = (request.args.get("from") or "").strip()
+    to_str    = (request.args.get("to") or "").strip()
+    date_from = date_to = None
+
+    if from_str or to_str:
+        range_key = "custom"
+        from datetime import datetime as _dt
+        try:
+            if from_str:
+                date_from = _dt.strptime(from_str, "%Y-%m-%d").timestamp()
+            if to_str:
+                date_to = _dt.strptime(to_str, "%Y-%m-%d").timestamp() + 86399
+        except ValueError:
+            pass
+    elif range_key == "today":
+        date_from = now - 86400
+    elif range_key == "7d":
+        date_from = now - 7 * 86400
+    elif range_key == "30d":
+        date_from = now - 30 * 86400
+    else:
+        range_key = "all"
+
+    data = get_tenant_analytics(tenant, date_from=date_from, date_to=date_to)
+    # نمرّر للـ builder: الـ key (لبناء روابط الأزرار) والـ range النشط
+    data["_range_key"] = range_key
+    data["_akey"] = request.args.get("key", "")
     return build_analytics_html(tenant, data), 200, {"Content-Type": "text/html; charset=utf-8"}
