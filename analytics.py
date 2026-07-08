@@ -106,7 +106,11 @@ def get_tenant_analytics(tenant):
         if s.get("has_order") and s.get("followup_stages_sent")
     )
 
-    conversion_rate = (len(all_orders) / total_conversations * 100) if total_conversations else 0
+    # معدل التحويل: من نفس مجموعة المحادثات (البسط والمقام من نفس النافذة الزمنية).
+    # مهم: حالات Redis بتنتهي بعد 30 يوم بينما جدول Orders دائم — لو قسمنا
+    # "كل طلبات التاريخ ÷ محادثات آخر 30 يوم" المعدل هيتضخم مع الوقت (ممكن يعدي 100%).
+    convos_with_order = sum(1 for s in states if s.get("has_order"))
+    conversion_rate = (convos_with_order / total_conversations * 100) if total_conversations else 0
 
     # ══ لوحة الفرص الضايعة ══════════════════════════════
     # تحليل يوضّح للتاجر فين بيخسر مبيعات
