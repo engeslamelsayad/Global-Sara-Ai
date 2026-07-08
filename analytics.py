@@ -118,8 +118,11 @@ def get_tenant_analytics(tenant, date_from=None, date_to=None):
             product_inquiries[pk] += 1
 
     # ── Follow-up stats من الحالات ──
-    fu1_sent = sum(1 for s in states if 1 in s.get("followup_stages_sent", []))
-    fu2_sent = sum(1 for s in states if 2 in s.get("followup_stages_sent", []))
+    # عدد المرسل لكل مرحلة (سلّم الـ 4 مراحل)
+    fu_by_stage = {n: sum(1 for s in states if n in s.get("followup_stages_sent", []))
+                   for n in (1, 2, 3, 4)}
+    fu1_sent = fu_by_stage[1]
+    fu2_sent = fu_by_stage[2]
     fu_converted = sum(
         1 for s in states
         if s.get("has_order") and s.get("followup_stages_sent")
@@ -250,6 +253,7 @@ def get_tenant_analytics(tenant, date_from=None, date_to=None):
         "human_handoffs": human_handoffs,
         "fu1_sent": fu1_sent,
         "fu2_sent": fu2_sent,
+        "fu_by_stage": fu_by_stage,
         "fu_converted": fu_converted,
         "funnel_counts": dict(funnel_counts),
         "orders_by_product": dict(orders_by_product),
@@ -596,13 +600,17 @@ def build_analytics_html(tenant, data):
   {lost_html}
 </div>
 {silence_html}
+{product_insights_html}
 {ads_html}
 
-<div class="sec"><h3>📬 Follow-up Stats</h3>
+<div class="sec"><h3>📬 Follow-up Stats — سلّم المتابعات الذكي</h3>
+  <p style="font-size:11px;color:#64748b;margin:0 0 10px">🧠 الرسائل بتتخصص حسب وضع العميل (شاف السعر وسكت / اعترض / مهتم) واسم منتجه</p>
   <div class="grid">
-    <div class="card"><h2>Follow-up #1 أُرسل</h2><div class="num yellow">{data['fu1_sent']}</div></div>
-    <div class="card"><h2>Follow-up #2 أُرسل</h2><div class="num" style="color:#f97316">{data['fu2_sent']}</div></div>
-    <div class="card"><h2>تحوّلوا لطلب</h2><div class="num green">{data['fu_converted']}</div></div>
+    <div class="card"><h2>#1 نكزة (6س)</h2><div class="num yellow">{data['fu_by_stage'][1]}</div></div>
+    <div class="card"><h2>#2 قيمة (24س)</h2><div class="num" style="color:#3b82f6">{data['fu_by_stage'][2]}</div></div>
+    <div class="card"><h2>#3 خصم 10%</h2><div class="num" style="color:#f97316">{data['fu_by_stage'][3]}</div></div>
+    <div class="card"><h2>#4 آخر فرصة</h2><div class="num" style="color:#ef4444">{data['fu_by_stage'][4]}</div></div>
+    <div class="card" style="border:2px solid #10b981"><h2>تحوّلوا لطلب</h2><div class="num green">{data['fu_converted']}</div></div>
   </div>
 </div>
 
