@@ -659,10 +659,17 @@ def get_ai_response(bundle, sender_id, user_message, state,
         response_text = ORDER_PATTERN.sub("", response_text).strip()
         if not state.get("has_order"):
             groups = order_match.groups()
+            _disc = groups[4].strip() if len(groups) > 4 else ""
+            # نحسب السعر النهائي — نفضّل المنتج المطابق، وإلا آخر منتج اتسأل عنه
+            _price_prod = matched_product
+            if not _price_prod and state.get("products_asked"):
+                _lpk = state["products_asked"][-1]
+                _price_prod = next((p for p in products if p.product_key == _lpk), None)
+            _order_price = compute_order_price(_price_prod, state, _disc)
             new_order = {
                 "name": groups[0].strip(), "phone": groups[1].strip(),
                 "address": groups[2].strip(), "product": groups[3].strip(),
-                "discount": groups[4].strip() if len(groups) > 4 else "",
+                "discount": _disc, "price": _order_price,
             }
             state["has_order"] = True
             state["stage"] = "ORDERED"
@@ -768,6 +775,7 @@ def push_to_google_sheet(tenant, order_data, page_id):
         requests.post(sheet_url, json={
             "name": order_data["name"], "phone": order_data["phone"],
             "address": order_data["address"], "product": order_data["product"],
+            "price": order_data.get("price", ""),
             "discount": order_data.get("discount", ""), "page": page_id,
             "business": tenant.business_name,
         }, timeout=10)
@@ -782,12 +790,75 @@ def push_to_google_sheet_async(tenant, order_data, page_id):
     ).start()
 
 
+def compute_order_price(product, state, discount_code=""):
+    """
+    يحسب السعر النهائي للطلب: السعر الأساسي × الكمية − الخصم.
+    product: كائن Product (أو None). state: حالة المحادثة.
+    بيرجّع string واضح زي "449 ج" أو "404 ج (بعد خصم 10%)".
+    """
+    import re as _re
+    if not product:
+        return ""
+    price_str = product.price_note or (f"{product.price_amount} ج" if product.price_amount else "")
+    _base = _re.search(r"\d{3,}", price_str or "")
+    if not _base:
+        return ""
+    base_price = int(_base.group(0))
+
+    # الكمية — من نص آخر رسائل العميل
+    hay = " ".join(h.get("content", "") for h in state.get("history", [])[-6:])
+    qty = 1
+    if any(w in hay for w in ["قطعتين", "قطعتان", "اتنين", "٢", "قطعتىن"]):
+        qty = 2
+    elif any(w in hay for w in ["3 قطع", "تلات", "ثلاث", "٣"]):
+        qty = 3
+
+    # نوع التسعير من صيغة الـ price_note الفعلية:
+    #  - "شامل الشحن" (زي 450) → السعر ثابت شامل، الكمية بتضربه
+    #  - BOGO (550 قطعتين) → عرض ثابت
+    #  - عادي (449 = 399+50 شحن) → 399×كمية + 50 شحن مرة واحدة
+    is_bogo = "550" in price_str and ("قطعتين" in price_str or "قطعتان" in price_str)
+    is_shipping_split = ("399" in price_str and "شحن" in price_str) or "50 شحن" in price_str
+    is_incl = "شامل" in price_str and not is_bogo
+
+    if is_bogo:
+        final = 550 if qty >= 2 else 449
+        note = "قطعتين عرض" if qty >= 2 else "قطعة واحدة"
+    elif is_shipping_split:
+        # 399×كمية + 50 شحن (مرة واحدة) — الصيغة "449 (399 + 50 شحن)"
+        final = 399 * qty + 50
+        note = f"{qty} قطع + شحن" if qty > 1 else "شامل الشحن"
+    elif is_incl:
+        # سعر شامل ثابت للقطعة
+        final = base_price * qty
+        note = f"{qty} قطعة" if qty > 1 else "شامل الشحن"
+    else:
+        unit = base_price - 50 if base_price > 100 else base_price
+        final = unit * qty + 50
+        note = f"{qty} قطع + شحن" if qty > 1 else "شامل الشحن"
+
+    # الخصم — من الكود أو من متابعة (has_discount)
+    disc_pct = 0
+    _d = _re.search(r"(\d+)", discount_code or "")
+    if _d and ("DISCOUNT" in (discount_code or "").upper() or "خصم" in (discount_code or "")):
+        disc_pct = int(_d.group(1))
+    elif state.get("has_discount"):
+        hd = state["has_discount"]
+        disc_pct = 10 if hd is True else int(hd)
+
+    if disc_pct:
+        after = round(final * (1 - disc_pct / 100))
+        return f"{after} ج (بعد خصم {disc_pct}% — الأصلي {final} ج، {note})"
+    return f"{final} ج ({note})"
+
+
 def save_order(tenant, order_data, page_id):
     """tenant: كائن Tenant كامل (مش id فقط) — محتاجينه عشان رابط الـ Google Sheet"""
     order = Order(
         tenant_id=tenant.id,
         customer_name=order_data["name"], customer_phone=order_data["phone"],
         customer_address=order_data["address"], product_name=order_data["product"],
+        order_price=order_data.get("price", ""),
         discount_code=order_data.get("discount", ""), page_id=page_id,
     )
     db.session.add(order)
@@ -1153,6 +1224,7 @@ def do_process_message(tenant_id, sender_id, user_message, page_id, platform,
         _telegram_alert(bundle["tenant"],
             f"🛒 <b>طلب جديد!</b>\n"
             f"المنتج: {new_order.get('product','')}\n"
+            f"السعر: {new_order.get('price','') or '—'}\n"
             f"العميل: {new_order.get('name','')} — {new_order.get('phone','')}\n"
             f"العنوان: {new_order.get('address','')[:60]}")
 

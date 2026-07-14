@@ -354,6 +354,7 @@ class Order(db.Model):
     customer_phone   = db.Column(db.String(40))
     customer_address = db.Column(db.Text)
     product_name     = db.Column(db.String(300))
+    order_price      = db.Column(db.String(120))   # السعر النهائي شامل الكمية والخصم
     discount_code    = db.Column(db.String(40))
     page_id          = db.Column(db.String(60))
 

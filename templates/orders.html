@@ -9,13 +9,14 @@
 <div class="card" style="padding:0; overflow:hidden">
   {% if orders %}
   <table>
-    <thead><tr><th>الاسم</th><th>الموبايل</th><th>المنتج</th><th>الخصم</th><th>التاريخ</th></tr></thead>
+    <thead><tr><th>الاسم</th><th>الموبايل</th><th>المنتج</th><th>السعر</th><th>الخصم</th><th>التاريخ</th></tr></thead>
     <tbody>
       {% for o in orders %}
       <tr>
         <td>{{ o.customer_name or '—' }}</td>
         <td style="direction:ltr; text-align:right">{{ o.customer_phone or '—' }}</td>
         <td>{{ o.product_name or '—' }}</td>
+        <td style="font-weight:700; color:#10b981">{{ o.order_price or '—' }}</td>
         <td>{% if o.discount_code %}<span class="badge badge-green">{{ o.discount_code }}</span>{% else %}—{% endif %}</td>
         <td style="color:var(--text-soft); font-size:13px">{{ o.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
       </tr>

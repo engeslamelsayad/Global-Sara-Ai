@@ -94,6 +94,11 @@ def run(flask_app=None):
                 f"ALTER TABLE products ADD COLUMN {col} {typ}",
                 f"products.{col}")
 
+        print("\n=== 2ب. جدول orders (عمود السعر) ===")
+        ok_all &= safe_alter(conn,
+            "ALTER TABLE orders ADD COLUMN order_price VARCHAR(120)",
+            "orders.order_price")
+
         print("\n=== 3. جدول smart_rules (جديد) ===")
         if is_pg:
             ok_all &= safe_alter(conn, """
