@@ -1,12 +1,5 @@
 {% extends "base.html" %}
-{% block title %}تصنيفات المحادثات<script>
-function toggleCustom(sel){
-  document.getElementById('custom-cond-wrap').style.display =
-    sel.value === 'custom' ? 'block' : 'none';
-  document.getElementById('add-cond').required = (sel.value === 'custom');
-}
-</script>
-{% endblock %}
+{% block title %}تصنيفات المحادثات{% endblock %}
 {% block content %}
 <div class="page-header">
   <h1 class="page-title">تصنيفات المحادثات (Labels) 🏷️</h1>
@@ -106,4 +99,20 @@ function toggleCustom(sel){
   <div class="empty-state"><p>لسه مفيش تصنيفات. أضف أول تصنيف فوق 👆</p></div>
   {% endif %}
 </div>
+<script>
+function toggleCustom(sel){
+  const wrap = document.getElementById('custom-cond-wrap');
+  const cond = document.getElementById('add-cond');
+  const isCustom = sel.value === 'custom';
+  wrap.style.display = isCustom ? 'block' : 'none';
+  cond.required = isCustom;
+  if(isCustom) setTimeout(()=> cond.focus(), 50);
+}
+// نضبط الحالة عند تحميل الصفحة (لو الاختيار محفوظ بعد خطأ مثلاً)
+document.addEventListener('DOMContentLoaded', function(){
+  const sel = document.getElementById('add-stage');
+  if(sel) toggleCustom(sel);
+});
+</script>
+
 {% endblock %}
