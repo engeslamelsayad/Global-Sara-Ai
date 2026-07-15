@@ -143,40 +143,23 @@ def run(flask_app=None):
         else:
             print("  ⏭  SQLite: meta_labels ستُنشأ بـ db.create_all() تلقائياً")
 
-        print("\n=== 5. كلمات الاعتراضات (backfill للـ tenants الموجودين) ===")
-        # الاعتراضات (غالي/مش متأكد/بعدين) بتغذي: رصد الاعتراض بالنوع
-        # + العروض الديناميكية + رؤى المنتجات. بنضيفها لأي tenant ناقصها.
+        print("\n=== 5. الكلمات المفتاحية الافتراضية (backfill) ===")
+        # شكاوى (نصب/شتائم/تهديدات/فشل منتج) + طلب موظف + اعتراضات بالنوع.
+        # بنضيف الناقص بس — اللي التاجر ضافه أو عدّله مابنلمسوش.
         try:
             from models import Tenant, Keyword
-            OBJECTION_KEYWORDS = {
-                "objection_expensive": ["غالي", "غاليه", "غالى", "كتير عليا", "كتير أوي",
-                                        "مبالغ", "سعره كبير", "مش قد كده", "في أرخص",
-                                        "فيه أرخص", "ارخص", "تخفيض", "خصم"],
-                "objection_unsure":    ["مش متأكد", "مش متاكد", "مش واثق", "خايف",
-                                        "قلقان", "هل بجد", "بجد بيجيب نتيجة", "مضمون",
-                                        "نصاب", "نصب", "مش مقتنع", "محتار", "محتارة"],
-                "objection_later":     ["بعدين", "هفكر", "افكر", "أفكر", "لما أشوف",
-                                        "مش دلوقتي", "لسه", "هرجع لك", "هرجعلك",
-                                        "أستأذن", "هشوف وأرد", "مش وقته"],
-            }
+            import default_keywords
             added_total = 0
             for tenant in Tenant.query.all():
-                existing = {(k.category, k.value) for k in
-                            Keyword.query.filter_by(tenant_id=tenant.id).all()}
-                for cat, kws in OBJECTION_KEYWORDS.items():
-                    for kw in kws:
-                        if (cat, kw) not in existing:
-                            db.session.add(Keyword(tenant_id=tenant.id,
-                                                   category=cat, value=kw))
-                            added_total += 1
+                added_total += default_keywords.seed_for_tenant(db, Keyword, tenant.id)
             if added_total:
                 db.session.commit()
-                print(f"  ✅ اتضاف {added_total} كلمة اعتراض للـ tenants الموجودين")
+                print(f"  ✅ اتضاف {added_total} كلمة مفتاحية للحسابات الموجودة")
             else:
-                print("  ⏭  كلمات الاعتراضات موجودة بالفعل")
+                print("  ⏭  كل الحسابات عندها الكلمات الافتراضية بالفعل")
         except Exception as e:
             db.session.rollback()
-            print(f"  ⚠️ objection keywords backfill: {e}")
+            print(f"  ⚠️ keywords backfill: {e}")
             ok_all = False
 
         print("\n=== 6. ترقية سلّم المتابعات لـ 4 مراحل ===")
@@ -214,6 +197,31 @@ def run(flask_app=None):
         except Exception as e:
             db.session.rollback()
             print(f"  ⚠️ followup stages upgrade: {e}")
+            ok_all = False
+
+        print("\n=== 7. الافتتاحيات الممنوعة الافتراضية ===")
+        # جمل بتقتل البيعة من أول سطر (اعتذار/نفي/تشكيك/كشف إنها موظفة مبيعات).
+        # بنضيفها للحسابات اللي حقلها فاضي بس — اللي عدّله التاجر مابنلمسوش.
+        try:
+            from models import BotConfig
+            import json as _json
+            DEFAULT_OPENERS = ["بصراحة أنا موظفة مبيعات", "للأسف مش عندنا",
+                               "آسفة بس", "أنا مش متأكدة"]
+            filled = 0
+            for bc in BotConfig.query.all():
+                current = (bc.forbidden_openers or "").strip()
+                is_empty = current in ("", "[]", "null", "None")
+                if is_empty:
+                    bc.forbidden_openers = _json.dumps(DEFAULT_OPENERS, ensure_ascii=False)
+                    filled += 1
+            if filled:
+                db.session.commit()
+                print(f"  ✅ اتضافت الافتتاحيات الافتراضية لـ {filled} حساب")
+            else:
+                print("  ⏭  كل الحسابات عندها افتتاحيات بالفعل")
+        except Exception as e:
+            db.session.rollback()
+            print(f"  ⚠️ forbidden openers backfill: {e}")
             ok_all = False
 
         # مفيش conn.commit() هنا — كل أمر بيعمل commit لوحده في safe_alter

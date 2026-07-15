@@ -23,10 +23,45 @@ def is_configured():
     return bool(TELEGRAM_BOT_TOKEN)
 
 
+TG_MAX_CHARS = 4000   # حد تليجرام 4096 — بنسيب هامش أمان
+
+
 def send_message(chat_id, text, parse_mode="HTML"):
-    """يبعت رسالة لمحادثة تليجرام"""
+    """
+    يبعت رسالة لمحادثة تليجرام.
+    لو النص أطول من حد تليجرام، بيتقسم تلقائياً على رسائل متتالية
+    (بيقسم عند فواصل الأقسام عشان مايكسرش تنسيق الـ HTML).
+    """
     if not TELEGRAM_BOT_TOKEN or not chat_id:
         return False
+    parts = _split_message(text) if len(text) > TG_MAX_CHARS else [text]
+    ok_all = True
+    for p in parts:
+        ok_all &= _send_single(chat_id, p, parse_mode)
+    return ok_all
+
+
+def _split_message(text):
+    """يقسم النص الطويل على أجزاء — بيفضّل القطع عند سطر فاضي (نهاية قسم)"""
+    parts, current = [], ""
+    for block in text.split("\n\n"):
+        candidate = (current + "\n\n" + block) if current else block
+        if len(candidate) <= TG_MAX_CHARS:
+            current = candidate
+        else:
+            if current:
+                parts.append(current)
+            # لو البلوك نفسه أطول من الحد، نقصّه
+            while len(block) > TG_MAX_CHARS:
+                parts.append(block[:TG_MAX_CHARS])
+                block = block[TG_MAX_CHARS:]
+            current = block
+    if current:
+        parts.append(current)
+    return parts
+
+
+def _send_single(chat_id, text, parse_mode="HTML"):
     try:
         r = requests.post(
             f"{API_BASE}/sendMessage",
@@ -38,6 +73,8 @@ def send_message(chat_id, text, parse_mode="HTML"):
             },
             timeout=15,
         )
+        if r.status_code != 200:
+            print(f"⚠️ Telegram {r.status_code}: {r.text[:120]}")
         return r.status_code == 200 and r.json().get("ok", False)
     except Exception as e:
         print(f"⚠️ Telegram send error: {e}")
@@ -128,70 +165,145 @@ def process_link_messages(app):
         pass
 
 
+def _esc(s):
+    """تهريب رموز HTML عشان أسماء المنتجات ماتكسرش تنسيق تليجرام"""
+    return (str(s or "").replace("&", "&amp;")
+            .replace("<", "&lt;").replace(">", "&gt;"))
+
+
 def build_weekly_report(tenant, data, loss_analysis=None):
-    """يبني نص التقرير الأسبوعي بصيغة HTML لتليجرام"""
+    """
+    يبني التقرير الأسبوعي — نسخة غنية بتعكس الداشبورد:
+    نظرة سريعة + الطلبات + رؤى المنتجات + نقاط الصمت + سلّم المتابعات
+    + الفرص الضايعة + أداء الإعلانات + تنبيهات + تحليل AI
+    """
     lost = data.get("lost_opportunities", {})
+    sil  = data.get("silence", {})
+    fu   = data.get("fu_by_stage", {}) or {}
+    S = []   # الأقسام
 
-    # أفضل منتج مبيعاً
-    top_products = sorted(
-        data.get("orders_by_product", {}).items(),
-        key=lambda x: x[1], reverse=True
+    # ══ 1) نظرة سريعة ══
+    conv_rate = data.get("conversion_rate", 0)
+    rate_icon = "🟢" if conv_rate >= 20 else ("🟠" if conv_rate >= 8 else "🔴")
+    S.append(
+        f"📊 <b>التقرير الأسبوعي — {_esc(tenant.business_name)}</b>\n"
+        f"━━━━━━━━━━━━━━━━━"
     )
-    top_line = ""
+    S.append(
+        f"🗓 <b>نظرة سريعة</b>\n"
+        f"💬 محادثات: <b>{data.get('total_conversations', 0)}</b>"
+        f"   |   🟢 نشطين دلوقتي: <b>{data.get('active_last_hour', 0)}</b>\n"
+        f"{rate_icon} معدل التحويل: <b>{conv_rate}%</b>"
+    )
+
+    # ══ 2) الطلبات ══
+    orders_lines = [
+        f"🛒 <b>الطلبات</b>",
+        f"آخر 24 ساعة: <b>{data.get('orders_last_24h', 0)}</b>   |   "
+        f"آخر 7 أيام: <b>{data.get('orders_last_7d', 0)}</b>",
+        f"آخر 30 يوم: <b>{data.get('orders_last_30d', 0)}</b>   |   "
+        f"الإجمالي: <b>{data.get('total_orders', 0)}</b>",
+    ]
+    top_products = sorted(data.get("orders_by_product", {}).items(),
+                          key=lambda x: x[1], reverse=True)
     if top_products:
-        name, cnt = top_products[0]
-        top_line = f"\n🏆 أكتر منتج مبيعاً: <b>{name}</b> ({cnt} طلب)"
+        orders_lines.append("\n🏆 <b>الأكتر مبيعاً:</b>")
+        for name, cnt in top_products[:3]:
+            orders_lines.append(f"• {_esc(name)}: <b>{cnt}</b> طلب")
+    S.append("\n".join(orders_lines))
 
-    # فجوة أكبر منتج (فرصة ضايعة)
-    gap_line = ""
-    if lost.get("gap_products"):
-        worst = lost["gap_products"][0]
-        if worst["conversion"] < 30:
-            gap_line = (
-                f"\n\n⚠️ <b>فرصة للتحسين:</b>\n"
-                f"منتج «{worst['name']}» اتسأل عنه {worst['asked']} مرة "
-                f"واتباع {worst['bought']} بس (تحويل {worst['conversion']:.0f}%)"
-            )
+    # ══ 3) رؤى المنتجات ══
+    pins = data.get("product_insights", [])
+    if pins:
+        lines = ["🔬 <b>رؤى المنتجات</b> <i>(سألوا → طلبوا → تحويل)</i>"]
+        for r in pins[:5]:
+            c = r.get("conversion", 0)
+            icon = "🟢" if c >= 20 else ("🟠" if c >= 8 else "🔴")
+            lines.append(
+                f"{icon} <b>{_esc(r['name'])[:28]}</b>: "
+                f"{r['asked']} → {r['orders']} → <b>{c:.0f}%</b>")
+            # تفصيل الاعتراضات لو موجودة
+            objs = []
+            if r.get("expensive"):    objs.append(f"غالي {r['expensive']}")
+            if r.get("unsure"):       objs.append(f"مش متأكد {r['unsure']}")
+            if r.get("later"):        objs.append(f"بعدين {r['later']}")
+            if r.get("price_silent"): objs.append(f"شاف السعر وسكت {r['price_silent']}")
+            if objs:
+                lines.append(f"    ↳ <i>{' · '.join(objs)}</i>")
+        S.append("\n".join(lines))
 
-    # ── تحليل AI لأسباب فقدان البيع ──
-    ai_section = ""
+    # ══ 4) فين العملاء بيسكتوا ══
+    if any(sil.get(k) for k in ("after_price", "after_obj", "first_msg", "interested")):
+        prr = sil.get("price_reply_rate", 0)
+        prr_icon = "🟢" if prr >= 50 else ("🟠" if prr >= 25 else "🔴")
+        S.append(
+            f"🔇 <b>فين العملاء بيسكتوا؟</b>\n"
+            f"💸 شافوا السعر وسكتوا: <b>{sil.get('after_price', 0)}</b>\n"
+            f"⚠️ اعترضوا وسكتوا: <b>{sil.get('after_obj', 0)}</b>\n"
+            f"👋 سألوا سؤال وسكتوا: <b>{sil.get('first_msg', 0)}</b>\n"
+            f"❤️ كانوا مهتمين وسكتوا: <b>{sil.get('interested', 0)}</b>\n"
+            f"{prr_icon} نسبة الرد بعد سماع السعر: <b>{prr:.0f}%</b>"
+        )
+
+    # ══ 5) سلّم المتابعات ══
+    fu_total = sum(fu.get(n, 0) for n in (1, 2, 3, 4))
+    fu_cv = data.get("fu_converted", 0)
+    fu_rate = (fu_cv / fu_total * 100) if fu_total else 0
+    S.append(
+        f"🔔 <b>سلّم المتابعات الذكي</b>\n"
+        f"#1 نكزة: <b>{fu.get(1, 0)}</b>  |  #2 قيمة: <b>{fu.get(2, 0)}</b>  |  "
+        f"#3 خصم: <b>{fu.get(3, 0)}</b>  |  #4 آخر فرصة: <b>{fu.get(4, 0)}</b>\n"
+        f"📤 الإجمالي: <b>{fu_total}</b>  →  ✅ تحوّلوا لطلب: <b>{fu_cv}</b>"
+        + (f" (<b>{fu_rate:.0f}%</b>)" if fu_total else "")
+    )
+
+    # ══ 6) الفرص الضايعة ══
+    lost_lines = [
+        f"💸 <b>الفرص الضايعة</b>",
+        f"مهتمين ما اشتروش: <b>{lost.get('interested_no_order', 0)}</b>",
+        f"اعترضوا على السعر: <b>{lost.get('objections', 0)}</b>",
+    ]
+    gaps = lost.get("gap_products") or []
+    weak = [g for g in gaps if g.get("conversion", 100) < 30][:2]
+    if weak:
+        lost_lines.append("\n⚠️ <b>محتاج مراجعة:</b>")
+        for g in weak:
+            lost_lines.append(
+                f"• «{_esc(g['name'])[:26]}»: اتسأل {g['asked']} مرة → "
+                f"باع {g['bought']} بس (<b>{g['conversion']:.0f}%</b>)")
+    S.append("\n".join(lost_lines))
+
+    # ══ 7) أداء الإعلانات ══
+    ads = data.get("ads_performance", [])
+    if ads:
+        lines = ["📢 <b>أداء الإعلانات</b>"]
+        for ad in ads[:3]:
+            c = ad["conversion"]
+            icon = "🟢" if c >= 20 else ("🟠" if c >= 8 else "🔴")
+            lines.append(
+                f"{icon} «{_esc(ad['title'])[:26]}»: {ad['convos']} محادثة → "
+                f"{ad['orders']} طلب (<b>{c:.0f}%</b>)")
+        S.append("\n".join(lines))
+
+    # ══ 8) محتاج انتباهك ══
+    complaints = data.get("complaints", 0)
+    handoffs   = data.get("human_handoffs", 0)
+    if complaints or handoffs:
+        S.append(
+            f"🚨 <b>محتاج انتباهك</b>\n"
+            f"شكاوى: <b>{complaints}</b>   |   طلبوا موظف: <b>{handoffs}</b>"
+        )
+
+    # ══ 9) تحليل AI ══
     if loss_analysis and loss_analysis.get("breakdown"):
-        lines = ["\n\n🧠 <b>تحليل AI: ليه العملاء ماشتروش؟</b>"]
+        lines = ["🧠 <b>تحليل AI: ليه العملاء ماشتروش؟</b>"]
         for item in loss_analysis["breakdown"][:4]:
-            lines.append(f"• {item.get('reason','')}: <b>{item.get('percent',0)}%</b>")
+            lines.append(f"• {_esc(item.get('reason',''))}: <b>{item.get('percent',0)}%</b>")
         if loss_analysis.get("suggestions"):
             lines.append("\n💡 <b>اقتراحات للتحسين:</b>")
             for s in loss_analysis["suggestions"][:3]:
-                lines.append(f"← {s}")
-        ai_section = "\n".join(lines)
+                lines.append(f"← {_esc(s)}")
+        S.append("\n".join(lines))
 
-    # ── أداء الإعلانات ──
-    ads_section = ""
-    ads = data.get("ads_performance", [])
-    if ads:
-        lines = ["\n\n📢 <b>أداء الإعلانات:</b>"]
-        for ad in ads[:3]:
-            lines.append(
-                f"• «{ad['title'][:30]}»: {ad['convos']} محادثة → "
-                f"{ad['orders']} طلب (تحويل <b>{ad['conversion']:.0f}%</b>)")
-        ads_section = "\n".join(lines)
-
-    report = f"""📊 <b>التقرير الأسبوعي — {tenant.business_name}</b>
-━━━━━━━━━━━━━━━━━
-
-🗓 <b>آخر 7 أيام:</b>
-💬 محادثات جديدة: <b>{data.get('total_conversations', 0)}</b>
-🛒 طلبات: <b>{data.get('orders_last_7d', 0)}</b>
-📈 معدل التحويل: <b>{data.get('conversion_rate', 0)}%</b>{top_line}
-
-🔔 <b>المتابعات (Follow-up):</b>
-أُرسلت: {data.get('fu1_sent', 0) + data.get('fu2_sent', 0)} | تحوّلت لطلب: <b>{data.get('fu_converted', 0)}</b>
-
-💸 <b>الفرص الضايعة:</b>
-مهتمين ما اشتروش: <b>{lost.get('interested_no_order', 0)}</b>
-اعترضوا على السعر: <b>{lost.get('objections', 0)}</b>{gap_line}{ai_section}{ads_section}
-
-━━━━━━━━━━━━━━━━━
-🤖 تقرير تلقائي من بوت المبيعات"""
-
-    return report
+    S.append("━━━━━━━━━━━━━━━━━\n🤖 تقرير تلقائي من بوت المبيعات")
+    return "\n\n".join(S)

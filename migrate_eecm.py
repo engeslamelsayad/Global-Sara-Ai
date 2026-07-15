@@ -264,29 +264,10 @@ def run_migration():
         print(f"✅ {len(EECM_PRODUCTS)} products migrated")
 
         # ── Keywords ──
-        for kw in HUMAN_KEYWORDS:
-            db.session.add(Keyword(tenant_id=tenant.id, category="human", value=kw))
-        for kw in COMPLAINT_KEYWORDS:
-            db.session.add(Keyword(tenant_id=tenant.id, category="complaint", value=kw))
-
-        # كلمات الاعتراضات (بتغذي: رصد الاعتراض بالنوع + العروض الديناميكية + رؤى المنتجات)
-        OBJECTION_KEYWORDS = {
-            "objection_expensive": ["غالي", "غاليه", "غالى", "كتير عليا", "كتير أوي",
-                                    "مبالغ", "سعره كبير", "مش قد كده", "في أرخص",
-                                    "فيه أرخص", "ارخص", "تخفيض", "خصم"],
-            "objection_unsure":    ["مش متأكد", "مش متاكد", "مش واثق", "خايف",
-                                    "قلقان", "هل بجد", "بجد بيجيب نتيجة", "مضمون",
-                                    "نصاب", "نصب", "مش مقتنع", "محتار", "محتارة"],
-            "objection_later":     ["بعدين", "هفكر", "افكر", "أفكر", "لما أشوف",
-                                    "مش دلوقتي", "لسه", "هرجع لك", "هرجعلك",
-                                    "أستأذن", "هشوف وأرد", "مش وقته"],
-        }
-        obj_count = 0
-        for cat, kws in OBJECTION_KEYWORDS.items():
-            for kw in kws:
-                db.session.add(Keyword(tenant_id=tenant.id, category=cat, value=kw))
-                obj_count += 1
-        print(f"✅ {len(HUMAN_KEYWORDS)} human + {len(COMPLAINT_KEYWORDS)} complaint + {obj_count} objection keywords")
+        # المصدر الموحّد: default_keywords.py (نفس اللي بيستخدمه create_tenant والـ backfill)
+        import default_keywords
+        n_kw = default_keywords.seed_for_tenant(db, Keyword, tenant.id, skip_existing=False)
+        print(f"✅ {n_kw} keyword (human + complaint + objections)")
 
         # ── Bot App IDs (من اللوج اللي حللناه قبل كده) ──
         for app_id, label in [
