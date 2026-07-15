@@ -6,75 +6,173 @@
   <p class="page-sub">كلمات بتخلي البوت يتصرف بشكل خاص — يطلب موظف بشري أو يعتبرها شكوى</p>
 </div>
 
+<div id="toast" style="display:none; position:fixed; top:16px; left:50%; transform:translateX(-50%);
+     background:#10b981; color:#fff; padding:10px 22px; border-radius:10px; font-weight:700;
+     z-index:999; box-shadow:0 4px 16px rgba(0,0,0,.15)"></div>
+
 <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px">
 
+  {% for cat, title, icon, badge in [
+      ('human', 'طلب موظف بشري', '🙋', 'badge-purple'),
+      ('complaint', 'شكاوى', '🚨', 'badge-red')] %}
   <div class="card">
-    <h3>🙋 طلب موظف بشري</h3>
-    <button type="button" class="btn-ai" onclick="suggest('human')">✨ اقترح كلمات إضافية</button>
-    <div id="ai-result-human" class="ai-box"></div>
+    <h3>{{ icon }} {{ title }}</h3>
+    <button type="button" class="btn-ai" onclick="suggest('{{ cat }}', this)">✨ اقترح كلمات إضافية</button>
+    <div id="ai-result-{{ cat }}" class="ai-box"></div>
 
-    <form method="POST" action="{{ url_for('dashboard.keyword_add') }}" style="margin-top:14px; display:flex; gap:8px">
-      <input type="hidden" name="category" value="human">
-      <input type="text" name="value" placeholder="كلمة جديدة..." required style="flex:1">
-      <button class="btn btn-primary btn-sm" type="submit">إضافة</button>
-    </form>
+    <div style="margin-top:14px; display:flex; gap:8px">
+      <input type="text" id="new-{{ cat }}" placeholder="كلمة جديدة..." style="flex:1; margin:0"
+             onkeydown="if(event.key==='Enter'){event.preventDefault(); addOne('{{ cat }}');}">
+      <button class="btn btn-primary btn-sm" type="button" onclick="addOne('{{ cat }}')">إضافة</button>
+    </div>
 
-    <div style="margin-top:14px; display:flex; flex-wrap:wrap; gap:6px">
-      {% for kw in human_kw %}
-      <form method="POST" action="{{ url_for('dashboard.keyword_delete', keyword_id=kw.id) }}" style="display:inline">
-        <button class="badge badge-purple" style="border:none; cursor:pointer" type="submit" title="حذف">
-          {{ kw.value }} ✕
-        </button>
-      </form>
+    <div id="chips-{{ cat }}" style="margin-top:14px; display:flex; flex-wrap:wrap; gap:6px">
+      {% for kw in (human_kw if cat == 'human' else complaint_kw) %}
+      <button class="badge {{ badge }}" style="border:none; cursor:pointer" title="حذف"
+              data-id="{{ kw.id }}" onclick="delKw(this)">{{ kw.value }} ✕</button>
       {% endfor %}
     </div>
   </div>
-
-  <div class="card">
-    <h3>🚨 شكاوى</h3>
-    <button type="button" class="btn-ai" onclick="suggest('complaint')">✨ اقترح كلمات إضافية</button>
-    <div id="ai-result-complaint" class="ai-box"></div>
-
-    <form method="POST" action="{{ url_for('dashboard.keyword_add') }}" style="margin-top:14px; display:flex; gap:8px">
-      <input type="hidden" name="category" value="complaint">
-      <input type="text" name="value" placeholder="كلمة جديدة..." required style="flex:1">
-      <button class="btn btn-primary btn-sm" type="submit">إضافة</button>
-    </form>
-
-    <div style="margin-top:14px; display:flex; flex-wrap:wrap; gap:6px">
-      {% for kw in complaint_kw %}
-      <form method="POST" action="{{ url_for('dashboard.keyword_delete', keyword_id=kw.id) }}" style="display:inline">
-        <button class="badge badge-red" style="border:none; cursor:pointer" type="submit" title="حذف">
-          {{ kw.value }} ✕
-        </button>
-      </form>
-      {% endfor %}
-    </div>
-  </div>
+  {% endfor %}
 
 </div>
 
 <script>
-async function suggest(category){
-  const btn = event.target;
-  const box = document.getElementById('ai-result-' + category);
+const BADGE = {human: 'badge-purple', complaint: 'badge-red'};
+let _sugg = {human: [], complaint: []};
+
+function toast(msg, color){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.background = color || '#10b981';
+  t.style.display = 'block';
+  clearTimeout(t._t);
+  t._t = setTimeout(()=> t.style.display = 'none', 2200);
+}
+function esc(s){
+  const d = document.createElement('div');
+  d.textContent = s == null ? '' : String(s);
+  return d.innerHTML;
+}
+
+// ── إضافة chip للقائمة من غير reload ──
+function addChip(cat, item){
+  const wrap = document.getElementById('chips-' + cat);
+  const b = document.createElement('button');
+  b.className = 'badge ' + BADGE[cat];
+  b.style.cssText = 'border:none; cursor:pointer';
+  b.title = 'حذف';
+  b.dataset.id = item.id;
+  b.textContent = item.value + ' ✕';
+  b.onclick = function(){ delKw(b); };
+  b.style.transition = 'transform .2s';
+  b.style.transform = 'scale(0.7)';
+  wrap.appendChild(b);
+  requestAnimationFrame(()=> b.style.transform = 'scale(1)');
+}
+
+async function postJSON(url, body){
+  const res = await fetch(url, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body)
+  });
+  return res.json();
+}
+
+// ── إضافة كلمة واحدة من خانة الإدخال ──
+async function addOne(cat){
+  const input = document.getElementById('new-' + cat);
+  const v = input.value.trim();
+  if(!v) return;
+  try{
+    const d = await postJSON("{{ url_for('dashboard.keyword_add_json') }}", {category: cat, values: [v]});
+    if(d.error){ toast(d.error, '#ef4444'); return; }
+    (d.added || []).forEach(it => addChip(cat, it));
+    if(d.added && d.added.length) { input.value = ''; toast('تمت الإضافة ✅'); }
+    else toast('الكلمة دي موجودة بالفعل', '#f59e0b');
+  }catch(e){ toast('حصل خطأ، حاول تاني', '#ef4444'); }
+}
+
+// ── إضافة مقترح واحد — من غير reload، والباقي بيفضل ظاهر ──
+async function addSuggestion(cat, value, btn){
+  btn.disabled = true;
+  try{
+    const d = await postJSON("{{ url_for('dashboard.keyword_add_json') }}", {category: cat, values: [value]});
+    if(d.error){ toast(d.error, '#ef4444'); btn.disabled = false; return; }
+    (d.added || []).forEach(it => addChip(cat, it));
+    // نشيل المقترح من القائمة (اتضاف خلاص) والباقي يفضل
+    btn.style.transition = 'opacity .2s';
+    btn.style.opacity = '0';
+    setTimeout(()=>{
+      btn.remove();
+      _sugg[cat] = _sugg[cat].filter(x => x !== value);
+      const box = document.getElementById('ai-result-' + cat);
+      if(!_sugg[cat].length) box.classList.remove('show');
+    }, 200);
+    toast(d.added && d.added.length ? 'تمت الإضافة ✅' : 'موجودة بالفعل', 
+          d.added && d.added.length ? '#10b981' : '#f59e0b');
+  }catch(e){ toast('حصل خطأ، حاول تاني', '#ef4444'); btn.disabled = false; }
+}
+
+// ── إضافة كل المقترحات بضغطة واحدة ──
+async function addAll(cat, btn){
+  const values = [..._sugg[cat]];
+  if(!values.length) return;
+  btn.disabled = true; btn.textContent = '⏳ جاري الإضافة...';
+  try{
+    const d = await postJSON("{{ url_for('dashboard.keyword_add_json') }}", {category: cat, values: values});
+    if(d.error){ toast(d.error, '#ef4444'); return; }
+    (d.added || []).forEach(it => addChip(cat, it));
+    _sugg[cat] = [];
+    const box = document.getElementById('ai-result-' + cat);
+    box.classList.remove('show');
+    box.innerHTML = '';
+    const n = (d.added || []).length;
+    toast(n ? `تمت إضافة ${n} كلمة ✅` : 'كلهم موجودين بالفعل', n ? '#10b981' : '#f59e0b');
+  }catch(e){ toast('حصل خطأ، حاول تاني', '#ef4444'); }
+  finally{ btn.disabled = false; btn.textContent = '✅ أضف الكل'; }
+}
+
+// ── حذف كلمة — من غير reload ──
+async function delKw(btn){
+  const id = btn.dataset.id;
+  try{
+    const res = await fetch(`/dashboard/keywords/${id}/delete-json`, {method:'POST'});
+    const d = await res.json();
+    if(d.error){ toast(d.error, '#ef4444'); return; }
+    btn.style.transition = 'opacity .2s';
+    btn.style.opacity = '0';
+    setTimeout(()=> btn.remove(), 200);
+    toast('تم الحذف');
+  }catch(e){ toast('حصل خطأ، حاول تاني', '#ef4444'); }
+}
+
+// ── طلب اقتراحات من الـ AI ──
+async function suggest(cat, btn){
+  const box = document.getElementById('ai-result-' + cat);
   btn.disabled = true; btn.textContent = '⏳ جاري التفكير...';
   try{
-    const res = await fetch("{{ url_for('dashboard.keywords_ai_suggest') }}", {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({category})
-    });
-    const data = await res.json();
-    if(data.error){ alert(data.error); return; }
-    const items = (data.suggested_keywords||[]).map(k =>
-      `<form method="POST" action="/dashboard/keywords/add" style="display:inline">
-        <input type="hidden" name="category" value="${category}">
-        <input type="hidden" name="value" value="${k}">
-        <button class="badge badge-purple" style="border:none;cursor:pointer;margin:3px" type="submit">+ ${k}</button>
-      </form>`).join('');
-    box.innerHTML = `<div class="ai-title">✨ اقتراحات — اضغط لإضافة أي كلمة</div>${items}`;
+    const d = await postJSON("{{ url_for('dashboard.keywords_ai_suggest') }}", {category: cat});
+    if(d.error){ toast(d.error, '#ef4444'); return; }
+    _sugg[cat] = d.suggested_keywords || [];
+    if(!_sugg[cat].length){
+      toast('مفيش اقتراحات جديدة — كل الكلمات موجودة عندك', '#f59e0b');
+      box.classList.remove('show');
+      return;
+    }
+    const items = _sugg[cat].map(k =>
+      `<button type="button" class="badge ${BADGE[cat]}" style="border:none;cursor:pointer;margin:3px"
+        onclick="addSuggestion('${cat}', ${JSON.stringify(k).replace(/"/g,'&quot;')}, this)">+ ${esc(k)}</button>`
+    ).join('');
+    box.innerHTML = `
+      <div class="ai-title">✨ اقتراحات — اضغط لإضافة أي كلمة</div>
+      <div>${items}</div>
+      <div style="margin-top:12px; padding-top:10px; border-top:1px solid #E2E8F0">
+        <button type="button" class="btn btn-primary btn-sm" onclick="addAll('${cat}', this)">✅ أضف الكل</button>
+        <span style="font-size:12px; color:#64748b; margin-right:8px">${_sugg[cat].length} كلمة مقترحة</span>
+      </div>`;
     box.classList.add('show');
-  }catch(e){ alert('حصل خطأ، حاول تاني'); }
+  }catch(e){ toast('حصل خطأ، حاول تاني', '#ef4444'); }
   finally{ btn.disabled=false; btn.textContent='✨ اقترح كلمات إضافية'; }
 }
 </script>

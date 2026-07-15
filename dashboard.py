@@ -646,15 +646,70 @@ def keyword_delete(keyword_id):
     return redirect(url_for("dashboard.keywords_list"))
 
 
+@dashboard_bp.route("/keywords/add-json", methods=["POST"])
+@login_required_dashboard
+def keyword_add_json():
+    """
+    إضافة كلمة أو أكتر بالـ AJAX — من غير reload للصفحة.
+    بيرجّع الكلمات المضافة بالـ IDs بتاعتها عشان الواجهة تحدّث نفسها.
+    """
+    tenant = _current_tenant()
+    data = request.get_json(silent=True) or {}
+    category = data.get("category")
+    values = data.get("values") or ([data["value"]] if data.get("value") else [])
+
+    if category not in ("human", "complaint"):
+        return jsonify({"error": "تصنيف غير صالح"}), 400
+    values = [str(v).strip() for v in values if str(v).strip()][:50]
+    if not values:
+        return jsonify({"error": "اكتب كلمة أولاً"}), 400
+
+    # منع التكرار — الكلمات الموجودة بالفعل بتتخطى
+    existing = {k.value for k in Keyword.query.filter_by(
+        tenant_id=tenant.id, category=category).all()}
+    added = []
+    for v in values:
+        if v in existing:
+            continue
+        kw = Keyword(tenant_id=tenant.id, category=category, value=v)
+        db.session.add(kw)
+        db.session.flush()
+        added.append({"id": kw.id, "value": v})
+        existing.add(v)
+
+    if added:
+        db.session.commit()
+        _invalidate(tenant)
+    return jsonify({"added": added, "skipped": len(values) - len(added)})
+
+
+@dashboard_bp.route("/keywords/<keyword_id>/delete-json", methods=["POST"])
+@login_required_dashboard
+def keyword_delete_json(keyword_id):
+    """حذف كلمة بالـ AJAX — من غير reload"""
+    tenant = _current_tenant()
+    kw = Keyword.query.filter_by(id=keyword_id, tenant_id=tenant.id).first()
+    if not kw:
+        return jsonify({"error": "الكلمة غير موجودة"}), 404
+    db.session.delete(kw)
+    db.session.commit()
+    _invalidate(tenant)
+    return jsonify({"deleted": True})
+
+
 @dashboard_bp.route("/keywords/ai-suggest", methods=["POST"])
 @login_required_dashboard
 def keywords_ai_suggest():
     tenant = _current_tenant()
     category = request.json.get("category", "complaint")
     existing = [k.value for k in Keyword.query.filter_by(tenant_id=tenant.id, category=category).all()]
-    result = ai_assist.suggest_keywords_for_category(
-        category, business_description=tenant.business_description or "", existing_keywords=existing
-    )
+    try:
+        result = ai_assist.suggest_keywords_for_category(
+            category, business_description=tenant.business_description or "", existing_keywords=existing
+        )
+    except Exception as e:
+        print(f"⚠️ keywords_ai_suggest error: {e}")
+        return jsonify({"error": "حصل خطأ في الاتصال بالـ AI — حاول تاني"}), 500
     return jsonify(result)
 
 
