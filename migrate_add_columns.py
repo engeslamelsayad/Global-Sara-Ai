@@ -244,6 +244,28 @@ def run(flask_app=None):
             print(f"  ⚠️ labels backfill: {e}")
             ok_all = False
 
+        print("\n=== 9. النموذج الافتراضي → Haiku ===")
+        # الحسابات القديمة اتزرعت بـ Sonnet كافتراضي. بنحوّلهم لـ Haiku
+        # (أرخص ~3x وأداؤه قريب في مهام البيع). التاجر يقدر يرجّعه من الداشبورد.
+        try:
+            from models import BotConfig
+            OLD_DEFAULT = "claude-sonnet-4-6"
+            NEW_DEFAULT = "claude-haiku-4-5-20251001"
+            switched = 0
+            for bc in BotConfig.query.all():
+                if (bc.model_name or "").strip() in ("", OLD_DEFAULT, "None"):
+                    bc.model_name = NEW_DEFAULT
+                    switched += 1
+            if switched:
+                db.session.commit()
+                print(f"  ✅ {switched} حساب اتحوّل للنموذج الافتراضي Haiku")
+            else:
+                print("  ⏭  كل الحسابات على النموذج المطلوب")
+        except Exception as e:
+            db.session.rollback()
+            print(f"  ⚠️ model default switch: {e}")
+            ok_all = False
+
         # مفيش conn.commit() هنا — كل أمر بيعمل commit لوحده في safe_alter
         conn.close()
 

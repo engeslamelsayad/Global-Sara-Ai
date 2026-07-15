@@ -43,6 +43,42 @@
     </div>
   </div>
 
+  <h3 style="margin-top:24px">🧠 نموذج الرد على الزبائن</h3>
+  <p class="helper-text" style="margin-bottom:12px">
+    ده المحرك اللي بيفكر ويرد على عملائك. التكلفة تقديرية لـ <b>10,000 محادثة شهرياً</b>
+    (متوسط 8 ردود للمحادثة) — محسوبة من استهلاك بوتك الفعلي مع تفعيل الـ caching.
+  </p>
+
+  <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:12px">
+    {% for m in models %}
+    <label class="model-card {{ 'model-selected' if (bc.model_name or 'claude-haiku-4-5-20251001') == m.id }}"
+           style="cursor:pointer; border:2px solid {{ m.badge_color if (bc.model_name or 'claude-haiku-4-5-20251001') == m.id else '#E2E8F0' }};
+                  border-radius:14px; padding:14px; margin:0; display:block; transition:all .2s;
+                  background:{{ m.badge_color ~ '0D' if (bc.model_name or 'claude-haiku-4-5-20251001') == m.id else '#fff' }}">
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px">
+        <input type="radio" name="model_name" value="{{ m.id }}" style="width:16px; height:16px; margin:0"
+               {{ 'checked' if (bc.model_name or 'claude-haiku-4-5-20251001') == m.id }}
+               onchange="selectModel(this)">
+        <strong style="font-size:15px">{{ m.label }}</strong>
+        <span style="background:{{ m.badge_color }}22; color:{{ m.badge_color }}; border-radius:8px;
+                     padding:2px 8px; font-size:11px; font-weight:700">{{ m.badge }}</span>
+      </div>
+      <div style="font-size:12px; color:#64748b; margin-bottom:10px; min-height:32px">{{ m.tagline }}</div>
+      <div style="background:#F8FAFC; border-radius:10px; padding:8px 10px">
+        <div style="font-size:22px; font-weight:800; color:{{ m.badge_color }}">
+          ${{ '%.0f'|format(m.cost) }}<span style="font-size:12px; color:#94a3b8; font-weight:400">/شهر</span>
+        </div>
+        <div style="font-size:11px; color:#94a3b8">≈ ${{ '%.3f'|format(m.per_convo) }} للمحادثة الواحدة</div>
+      </div>
+      <div style="font-size:11px; color:#94a3b8; margin-top:8px; line-height:1.6">{{ m.notes }}</div>
+    </label>
+    {% endfor %}
+  </div>
+  <p style="font-size:11px; color:#94a3b8; margin-top:10px">
+    ⚠️ التكلفة تقديرية وممكن تختلف حسب طول المحادثات الفعلية. الأسعار من Anthropic (يوليو 2026) وقابلة للتغيير —
+    راجع <a href="https://claude.com/pricing" target="_blank" style="color:#7c3aed">claude.com/pricing</a>.
+  </p>
+
   <h3 style="margin-top:24px">أسلوب الرد</h3>
   <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px">
     <div>
@@ -141,6 +177,20 @@
 </form>
 
 <script>
+// اختيار نموذج الرد — تحديث الإطار بصرياً
+function selectModel(radio){
+  document.querySelectorAll('.model-card').forEach(function(card){
+    const r = card.querySelector('input[type=radio]');
+    const isSel = r === radio;
+    card.classList.toggle('model-selected', isSel);
+    if(!isSel){ card.style.borderColor = '#E2E8F0'; card.style.background = '#fff'; }
+  });
+  const card = radio.closest('.model-card');
+  const color = radio.parentElement.querySelector('span').style.color || '#7c3aed';
+  card.style.borderColor = color;
+  card.style.background = color + '0D';
+}
+
 // تخزين آمن للقيم المقترحة (بدل حقنها في onclick — بيكسر مع الأسطر والعلامات)
 let _sug = {};
 function esc(s){

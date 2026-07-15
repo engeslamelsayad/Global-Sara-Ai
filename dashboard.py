@@ -454,6 +454,12 @@ def settings_bot():
         bc.bot_persona = request.form.get("bot_persona", "").strip()   # Text — بلا حد
         bc.dialect     = _cap("dialect", 40)
         bc.tone        = _cap("tone", 200)
+
+        # نموذج الرد على العملاء — نتحقق إنه من القائمة المسموحة
+        import model_catalog
+        _mid = request.form.get("model_name", "").strip()
+        if _mid and any(m["id"] == _mid for m in model_catalog.MODELS):
+            bc.model_name = _mid
         bc.max_reply_lines = int(request.form.get("max_reply_lines") or 5)
         bc.use_emojis  = bool(request.form.get("use_emojis"))
 
@@ -490,7 +496,9 @@ def settings_bot():
         flash("تم تحديث إعدادات البوت ✅", "success")
         return redirect(url_for("dashboard.settings_bot"))
 
+    import model_catalog
     return render_template("settings_bot.html", tenant=tenant, bc=bc,
+        models=model_catalog.models_with_costs(10000),
         forbidden_words=", ".join(json.loads(bc.forbidden_words or "[]")),
         forbidden_openers="\n".join(json.loads(bc.forbidden_openers or "[]")))
 

@@ -162,7 +162,7 @@ class BotConfig(db.Model):
     debounce_seconds   = db.Column(db.Integer, default=45)
     enable_vision       = db.Column(db.Boolean, default=True)
     max_tokens          = db.Column(db.Integer, default=600)
-    model_name           = db.Column(db.String(60), default="claude-sonnet-4-6")
+    model_name           = db.Column(db.String(60), default="claude-haiku-4-5-20251001")
 
     # ── العروض الديناميكية ──
     offer_hesitation_enabled   = db.Column(db.Boolean, default=False)   # خصم عند التردد

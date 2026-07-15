@@ -33,6 +33,10 @@ ORDER_PATTERN = re.compile(
     re.IGNORECASE
 )
 
+# النموذج الافتراضي للرد على العملاء — Haiku: سريع واقتصادي
+# (التاجر يقدر يغيّره من الداشبورد لكل حساب)
+DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+
 # علامة التصنيف المخصص — الـ AI بيطلعها لما شرط التاجر يتحقق
 # مثال: [LABEL|عميل جملة]
 LABEL_PATTERN = re.compile(r"\[LABEL\|([^\]]+)\]", re.IGNORECASE)
@@ -673,7 +677,7 @@ def get_ai_response(bundle, sender_id, user_message, state,
     messages = history + [{"role": "user", "content": user_content}]
 
     response_obj = client.messages.create(
-        model=bc.model_name or "claude-sonnet-4-6",
+        model=bc.model_name or DEFAULT_MODEL,
         max_tokens=bc.max_tokens or 600,
         system=system_blocks,
         messages=messages,
