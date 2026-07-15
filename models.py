@@ -417,6 +417,7 @@ class MetaLabel(db.Model):
       ordered       — العميل سجّل طلب
       complaint     — شكوى
       human_needed  — طلب موظف بشري
+      custom        — شرط مخصص بلغة طبيعية (الـ AI بيقيّمه — شوف custom_condition)
       none          — يدوي فقط (البوت مش بيطبّقها تلقائياً)
     """
     __tablename__ = "meta_labels"
@@ -425,6 +426,9 @@ class MetaLabel(db.Model):
     tenant_id     = db.Column(db.String(36), db.ForeignKey("tenants.id"), nullable=False, index=True)
     name          = db.Column(db.String(120), nullable=False)   # الاسم المعروض في Meta
     trigger_stage = db.Column(db.String(40), default="none")    # الحالة اللي بتفعّلها
+    # شرط مخصص بلغة طبيعية — بيشتغل لما trigger_stage = "custom"
+    # مثال: "لما العميل يسأل عن أسعار الجملة أو كميات كبيرة"
+    custom_condition = db.Column(db.Text)
     is_active     = db.Column(db.Boolean, default=True)
     # cache لـ label IDs على مستوى كل صفحة: {page_id: meta_label_id}
     meta_label_ids = db.Column(db.Text, default="{}")           # JSON

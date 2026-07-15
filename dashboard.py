@@ -883,15 +883,25 @@ def labels_list():
 @login_required_dashboard
 def label_add():
     tenant = _current_tenant()
-    name = request.form.get("name", "").strip()
+    name = request.form.get("name", "").strip()[:120]
     trigger_stage = request.form.get("trigger_stage", "none")
-    if name:
-        db.session.add(MetaLabel(
-            tenant_id=tenant.id, name=name, trigger_stage=trigger_stage
-        ))
-        db.session.commit()
-        _invalidate(tenant)
-        flash(f"تمت إضافة label '{name}' ✅", "success")
+    custom_condition = request.form.get("custom_condition", "").strip()
+
+    if not name:
+        flash("اكتب اسم التصنيف أولاً", "error")
+        return redirect(url_for("dashboard.labels_list"))
+    # الشرط المخصص إجباري لو الحالة "custom"
+    if trigger_stage == "custom" and not custom_condition:
+        flash("اكتب الشرط اللي البوت يصنّف على أساسه", "error")
+        return redirect(url_for("dashboard.labels_list"))
+
+    db.session.add(MetaLabel(
+        tenant_id=tenant.id, name=name, trigger_stage=trigger_stage,
+        custom_condition=custom_condition or None,
+    ))
+    db.session.commit()
+    _invalidate(tenant)
+    flash(f"تمت إضافة تصنيف '{name}' ✅", "success")
     return redirect(url_for("dashboard.labels_list"))
 
 
@@ -900,8 +910,10 @@ def label_add():
 def label_edit(label_id):
     tenant = _current_tenant()
     label = MetaLabel.query.filter_by(id=label_id, tenant_id=tenant.id).first_or_404()
-    label.name = request.form.get("name", "").strip() or label.name
+    label.name = request.form.get("name", "").strip()[:120] or label.name
     label.trigger_stage = request.form.get("trigger_stage", label.trigger_stage)
+    if "custom_condition" in request.form:
+        label.custom_condition = request.form.get("custom_condition", "").strip() or None
     # لو الاسم اتغير، امسح الـ cache عشان يتعمل label جديدة بالاسم الجديد
     label.meta_label_ids = "{}"
     db.session.commit()

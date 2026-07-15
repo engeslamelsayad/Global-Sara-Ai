@@ -33,6 +33,10 @@ ORDER_PATTERN = re.compile(
     re.IGNORECASE
 )
 
+# علامة التصنيف المخصص — الـ AI بيطلعها لما شرط التاجر يتحقق
+# مثال: [LABEL|عميل جملة]
+LABEL_PATTERN = re.compile(r"\[LABEL\|([^\]]+)\]", re.IGNORECASE)
+
 # =====================================================================
 # STATE — Redis مع fallback لذاكرة محلية (نفس نمط النسخة القديمة)
 # =====================================================================
@@ -304,6 +308,30 @@ def build_system_prompt(bundle, matched_product=None, state=None):
         for cat, rules in rules_by_cat.items():
             for rule in rules:
                 smart_rules_txt += f"- {rule}\n"
+
+    # ── التصنيفات المخصصة: الـ AI بيقيّم شرط التاجر ويطلع علامة ──
+    from models import MetaLabel
+    custom_labels = MetaLabel.query.filter_by(
+        tenant_id=tenant.id, trigger_stage="custom", is_active=True
+    ).all()
+    custom_labels = [l for l in custom_labels if (l.custom_condition or "").strip()]
+
+    custom_labels_txt = ""
+    if custom_labels:
+        lines = ["\n[🏷️ التصنيفات المخصصة — مهم جداً]",
+                 "لو حالة العميل طابقت أي شرط من دول، اكتبي العلامة المقابلة في آخر ردك:"]
+        for l in custom_labels:
+            lines.append(f'- لو {l.custom_condition.strip()} → اكتبي [LABEL|{l.name}]')
+        lines += [
+            "قواعد العلامات:",
+            "- العلامة دي للنظام بس — العميل مش بيشوفها، فماتشرحيهاش ولا تعلقي عليها",
+            "- اكتبيها في آخر الرد بالظبط بالشكل ده: [LABEL|اسم التصنيف]",
+            "- ممكن تكتبي أكتر من علامة لو أكتر من شرط اتحقق",
+            "- ماتكتبيش علامة إلا لو الشرط اتحقق فعلاً — الدقة أهم من الكتر",
+        ]
+        custom_labels_txt = "\n".join(lines) + "\n"
+
+    smart_rules_txt += custom_labels_txt
 
     static_prompt = f"""أنت {bc.bot_name}، {bc.bot_persona}.
 عمرك {bc.bot_age} سنة. بتتكلم بلهجة {bc.dialect} بنبرة {bc.tone}.
@@ -651,6 +679,18 @@ def get_ai_response(bundle, sender_id, user_message, state,
         messages=messages,
     )
     response_text = response_obj.content[0].text
+
+    # ── كشف التصنيفات المخصصة ([LABEL|اسم]) ──
+    # الـ AI بيطلعها لما شرط التاجر يتحقق. بنشيلها من الرد (العميل مايشوفهاش)
+    # ونسجّلها في الـ state عشان الـ caller يطبّقها على Meta.
+    custom_hits = [m.strip() for m in LABEL_PATTERN.findall(response_text) if m.strip()]
+    if custom_hits:
+        response_text = LABEL_PATTERN.sub("", response_text).strip()
+        already = set(state.get("custom_labels_applied", []))
+        new_hits = [h for h in custom_hits if h not in already]
+        if new_hits:
+            state["pending_custom_labels"] = new_hits
+            print(f"🏷️ Custom labels matched: {new_hits} → {sender_id}")
 
     # ── كشف الطلب ──
     order_match = ORDER_PATTERN.search(response_text)
@@ -1133,6 +1173,46 @@ def _apply_label_to_user(label, sender_id, page_id, access_token):
         print(f"⚠️ Label apply error: {e}")
 
 
+def apply_custom_labels(bundle, sender_id, page_id, label_names):
+    """
+    يطبّق تصنيفات مخصصة بالاسم (اللي الـ AI رصدها) — non-blocking.
+    label_names: قائمة أسماء التصنيفات زي ما الـ AI كتبها في [LABEL|...]
+    """
+    from models import MetaLabel
+    from flask import current_app
+    tenant = bundle["tenant"]
+    page = bundle["pages"].get(page_id)
+    if not page or not page.access_token or not label_names:
+        return
+
+    labels = MetaLabel.query.filter_by(
+        tenant_id=tenant.id, trigger_stage="custom", is_active=True
+    ).all()
+    # مطابقة بالاسم (متسامحة مع الفراغات والحالة)
+    by_name = {(l.name or "").strip().lower(): l.id for l in labels}
+    ids = []
+    for n in label_names:
+        lid = by_name.get(n.strip().lower())
+        if lid:
+            ids.append(lid)
+        else:
+            print(f"⚠️ Custom label '{n}' مش موجود في تصنيفات {tenant.slug}")
+    if not ids:
+        return
+
+    access_token = page.access_token
+    app_obj = current_app._get_current_object()
+
+    def _worker():
+        with app_obj.app_context():
+            for lid in ids:
+                lbl = MetaLabel.query.get(lid)
+                if lbl:
+                    _apply_label_to_user(lbl, sender_id, page_id, access_token)
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+
 def apply_stage_labels(bundle, sender_id, page_id, stage):
     """
     يطبّق كل الـ labels المرتبطة بحالة معينة (trigger_stage) — non-blocking.
@@ -1269,6 +1349,12 @@ def do_process_message(tenant_id, sender_id, user_message, page_id, platform,
         apply_stage_labels(bundle, sender_id, page_id, "interested")
     elif state.get("stage") == "OBJECTION":
         apply_stage_labels(bundle, sender_id, page_id, "objection")
+
+    # ── التصنيفات المخصصة اللي الـ AI رصدها ──
+    _custom = state.pop("pending_custom_labels", None)
+    if _custom:
+        apply_custom_labels(bundle, sender_id, page_id, _custom)
+        state.setdefault("custom_labels_applied", []).extend(_custom)
 
     is_complaint = matches_category(user_message, keywords, "complaint")
     if is_complaint and not state.get("has_complaint"):

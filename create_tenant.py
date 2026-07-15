@@ -92,6 +92,11 @@ def run():
         n_kw = default_keywords.seed_for_tenant(db, Keyword, tenant.id)
         print(f"   ✅ {n_kw} كلمة مفتاحية افتراضية")
 
+        # ── تصنيفات Meta الافتراضية ──
+        from models import MetaLabel
+        n_lbl = default_keywords.seed_labels_for_tenant(db, MetaLabel, tenant.id)
+        print(f"   ✅ {n_lbl} تصنيف افتراضي")
+
         # ── المستخدم الأول ──
         user = User(
             tenant_id=tenant.id,

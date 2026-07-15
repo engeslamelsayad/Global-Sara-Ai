@@ -224,6 +224,26 @@ def run(flask_app=None):
             print(f"  ⚠️ forbidden openers backfill: {e}")
             ok_all = False
 
+        print("\n=== 8. تصنيفات Meta: عمود الشرط المخصص + الافتراضيات ===")
+        ok_all &= safe_alter(conn,
+            "ALTER TABLE meta_labels ADD COLUMN custom_condition TEXT",
+            "meta_labels.custom_condition")
+        try:
+            from models import Tenant, MetaLabel
+            import default_keywords
+            added_l = 0
+            for tenant in Tenant.query.all():
+                added_l += default_keywords.seed_labels_for_tenant(db, MetaLabel, tenant.id)
+            if added_l:
+                db.session.commit()
+                print(f"  ✅ اتضاف {added_l} تصنيف افتراضي")
+            else:
+                print("  ⏭  كل الحسابات عندها التصنيفات الافتراضية")
+        except Exception as e:
+            db.session.rollback()
+            print(f"  ⚠️ labels backfill: {e}")
+            ok_all = False
+
         # مفيش conn.commit() هنا — كل أمر بيعمل commit لوحده في safe_alter
         conn.close()
 

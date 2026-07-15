@@ -1,5 +1,12 @@
 {% extends "base.html" %}
-{% block title %}تصنيفات المحادثات{% endblock %}
+{% block title %}تصنيفات المحادثات<script>
+function toggleCustom(sel){
+  document.getElementById('custom-cond-wrap').style.display =
+    sel.value === 'custom' ? 'block' : 'none';
+  document.getElementById('add-cond').required = (sel.value === 'custom');
+}
+</script>
+{% endblock %}
 {% block content %}
 <div class="page-header">
   <h1 class="page-title">تصنيفات المحادثات (Labels) 🏷️</h1>
@@ -24,14 +31,27 @@
     <input type="text" name="name" required placeholder="مثال: شكاوى، عميل مهتم، أوردر مسجل">
 
     <label>متى يتطبّق تلقائياً؟</label>
-    <select name="trigger_stage">
+    <select name="trigger_stage" id="add-stage" onchange="toggleCustom(this)">
       <option value="none">يدوي فقط (البوت مش بيطبّقه)</option>
       <option value="interested">🟢 لما العميل يهتم بمنتج</option>
       <option value="objection">🟡 لما العميل يعترض (غالي/مش متأكد)</option>
       <option value="ordered">✅ لما العميل يسجّل طلب</option>
       <option value="complaint">🚨 لما العميل يشتكي</option>
       <option value="human_needed">🙋 لما العميل يطلب موظف بشري</option>
+      <option value="custom">✨ حالة مخصصة — اكتب الشرط بنفسك (الـ AI بيفهمه)</option>
     </select>
+
+    <div id="custom-cond-wrap" style="display:none; background:#F5F3FF; border:1px solid #DDD0F8;
+         border-radius:12px; padding:14px; margin-top:12px">
+      <label style="margin-top:0">✨ الشرط — اكتبه بلغة طبيعية</label>
+      <textarea name="custom_condition" id="add-cond" style="min-height:70px"
+        placeholder="مثال: العميل سأل عن أسعار الجملة أو كميات كبيرة"></textarea>
+      <p style="font-size:12px; color:#64748b; margin:8px 0 0">
+        البوت هيقرأ الشرط ده ويفهمه، ولما يتحقق هيحط التصنيف على العميل تلقائياً في الإنبوكس.
+        <br><b>أمثلة:</b> «العميل قال إنه من خارج مصر» · «العميل سأل عن الجملة» ·
+        «العميل قال إنه اشترى قبل كده» · «العميل عنده حساسية أو مرض مزمن»
+      </p>
+    </div>
     <div class="form-actions">
       <button class="btn btn-primary" type="submit">إضافة التصنيف</button>
     </div>
@@ -45,7 +65,8 @@
     <tbody>
       {% set stage_map = {
         'none':'يدوي فقط','interested':'🟢 اهتمام','objection':'🟡 اعتراض',
-        'ordered':'✅ طلب','complaint':'🚨 شكوى','human_needed':'🙋 طلب موظف'} %}
+        'ordered':'✅ طلب','complaint':'🚨 شكوى','human_needed':'🙋 طلب موظف',
+        'custom':'✨ حالة مخصصة'} %}
       {% for l in labels %}
       <tr style="{{ 'opacity:0.5' if not l.is_active }}">
         <td>
@@ -57,6 +78,10 @@
               {% endfor %}
             </select>
             <button class="btn btn-secondary btn-sm" type="submit">حفظ</button>
+            {% if l.trigger_stage == 'custom' %}
+            <input type="text" name="custom_condition" value="{{ l.custom_condition or '' }}"
+                   placeholder="الشرط..." style="width:100%; padding:6px 10px; font-size:12px; margin-top:6px">
+            {% endif %}
           </form>
         </td>
         <td><span class="badge badge-purple">{{ stage_map.get(l.trigger_stage, l.trigger_stage) }}</span></td>

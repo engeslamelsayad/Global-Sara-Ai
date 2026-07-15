@@ -100,3 +100,33 @@ def seed_for_tenant(db, Keyword, tenant_id, skip_existing=True):
         db.session.add(Keyword(tenant_id=tenant_id, category=cat, value=val))
         added += 1
     return added
+
+
+# ═══════════════════════════════════════════════════════════════════
+# تصنيفات Meta الافتراضية (Labels)
+# كل تصنيف مربوط بحالة — البوت بيحطه تلقائياً على العميل في الإنبوكس
+# ═══════════════════════════════════════════════════════════════════
+DEFAULT_LABELS = [
+    ("مهتم",       "interested"),     # 🟢 أبدى اهتمام بمنتج
+    ("اعتراض",     "objection"),      # 🟡 اعترض (غالي/مش متأكد)
+    ("طلب",        "ordered"),        # ✅ سجّل طلب
+    ("شكوى",       "complaint"),      # 🚨 اشتكى
+    ("طلب موظف",   "human_needed"),   # 🙋 طلب موظف بشري
+]
+
+
+def seed_labels_for_tenant(db, MetaLabel, tenant_id, skip_existing=True):
+    """يزرع تصنيفات Meta الافتراضية. بيرجّع عدد اللي اتضاف."""
+    existing = set()
+    if skip_existing:
+        existing = {l.trigger_stage for l in
+                    MetaLabel.query.filter_by(tenant_id=tenant_id).all()}
+    added = 0
+    for name, stage in DEFAULT_LABELS:
+        # بنتخطى لو فيه تصنيف مربوط بنفس الحالة بالفعل (حتى لو اسمه مختلف)
+        if stage in existing:
+            continue
+        db.session.add(MetaLabel(tenant_id=tenant_id, name=name,
+                                 trigger_stage=stage, is_active=True))
+        added += 1
+    return added
