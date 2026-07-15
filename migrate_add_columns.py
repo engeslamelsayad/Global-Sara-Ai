@@ -81,6 +81,15 @@ def run(flask_app=None):
                 f"ALTER TABLE bot_configs ADD COLUMN {col} {typ}",
                 f"bot_configs.{col}")
 
+        print("\n=== 1د. توسيع عمود tone (اقتراحات الـ AI طويلة) ===")
+        # سبب 500 عند حفظ شخصية البوت: الـ AI بيقترح نبرة أطول من VARCHAR(40)
+        if is_pg:
+            ok_all &= safe_alter(conn,
+                "ALTER TABLE bot_configs ALTER COLUMN tone TYPE VARCHAR(200)",
+                "bot_configs.tone → VARCHAR(200)")
+        else:
+            print("  ⏭  SQLite — مافيش حد على طول النص")
+
         print("\n=== 2. جدول products (الحقول الجديدة) ===")
         for col, typ in [
             ("features",         "TEXT"),

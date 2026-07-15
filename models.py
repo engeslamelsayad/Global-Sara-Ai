@@ -140,7 +140,7 @@ class BotConfig(db.Model):
     bot_age       = db.Column(db.Integer, default=28)
     bot_persona   = db.Column(db.Text, default="موظفة مبيعات ودودة ومحترفة")
     dialect       = db.Column(db.String(40), default="مصري")
-    tone          = db.Column(db.String(40), default="ودود وعملي")
+    tone          = db.Column(db.String(200), default="ودود وعملي")
 
     max_reply_lines   = db.Column(db.Integer, default=5)
     use_emojis        = db.Column(db.Boolean, default=True)

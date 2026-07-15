@@ -445,11 +445,15 @@ def settings_bot():
     bc = tenant.bot_config
 
     if request.method == "POST":
-        bc.bot_name    = request.form.get("bot_name", "").strip() or bc.bot_name
+        def _cap(field, limit):
+            """يقص القيمة للحد الأقصى للعمود — يمنع 500 لو الـ AI اقترح نص طويل"""
+            return (request.form.get(field, "") or "").strip()[:limit]
+
+        bc.bot_name    = _cap("bot_name", 80) or bc.bot_name
         bc.bot_age     = int(request.form.get("bot_age") or bc.bot_age)
-        bc.bot_persona = request.form.get("bot_persona", "").strip()
-        bc.dialect     = request.form.get("dialect", "").strip()
-        bc.tone        = request.form.get("tone", "").strip()
+        bc.bot_persona = request.form.get("bot_persona", "").strip()   # Text — بلا حد
+        bc.dialect     = _cap("dialect", 40)
+        bc.tone        = _cap("tone", 200)
         bc.max_reply_lines = int(request.form.get("max_reply_lines") or 5)
         bc.use_emojis  = bool(request.form.get("use_emojis"))
 
@@ -463,7 +467,7 @@ def settings_bot():
         bc.objection_unsure_response    = request.form.get("objection_unsure_response", "").strip()
         bc.objection_later_response     = request.form.get("objection_later_response", "").strip()
 
-        bc.contact_number  = request.form.get("contact_number", "").strip()
+        bc.contact_number  = _cap("contact_number", 40)
         bc.contact_channel = request.form.get("contact_channel", "whatsapp")
         bc.debounce_seconds = int(request.form.get("debounce_seconds") or 45)
         bc.enable_vision    = bool(request.form.get("enable_vision"))
@@ -475,7 +479,13 @@ def settings_bot():
         bc.offer_bundle_enabled       = bool(request.form.get("offer_bundle_enabled"))
         bc.offer_bundle_text          = request.form.get("offer_bundle_text", "").strip()
 
-        db.session.commit()
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            print(f"⚠️ settings_bot save error: {e}")
+            flash("حصل خطأ أثناء الحفظ — جرّب تختصر النصوص الطويلة وحاول تاني", "error")
+            return redirect(url_for("dashboard.settings_bot"))
         _invalidate(tenant)
         flash("تم تحديث إعدادات البوت ✅", "success")
         return redirect(url_for("dashboard.settings_bot"))
@@ -491,10 +501,18 @@ def ai_suggest_persona():
     tenant = _current_tenant()
     if not tenant.business_description:
         return jsonify({"error": "اكتب وصف البزنس في صفحة الإعدادات العامة أولاً"}), 400
-    result = ai_assist.suggest_bot_persona(
-        tenant.business_description, industry=tenant.industry or "",
-        dialect=tenant.bot_config.dialect if tenant.bot_config else "مصري",
-    )
+    # اللهجة المختارة في الصفحة دلوقتي (حتى لو لسه ماتحفظتش) — وإلا المحفوظة
+    dialect = (request.json or {}).get("dialect", "").strip() if request.is_json else ""
+    if not dialect:
+        dialect = tenant.bot_config.dialect if tenant.bot_config else "مصري"
+    try:
+        result = ai_assist.suggest_bot_persona(
+            tenant.business_description, industry=tenant.industry or "",
+            dialect=dialect,
+        )
+    except Exception as e:
+        print(f"⚠️ ai_suggest_persona error: {e}")
+        return jsonify({"error": "حصل خطأ في الاتصال بالـ AI — حاول تاني"}), 500
     return jsonify(result)
 
 
@@ -538,7 +556,28 @@ def ai_review_description():
     raw = request.json.get("description", "")
     if not raw:
         return jsonify({"error": "اكتب وصف أولاً"}), 400
-    result = ai_assist.review_business_description(raw)
+    try:
+        result = ai_assist.review_business_description(raw)
+    except Exception as e:
+        print(f"⚠️ ai_review_description error: {e}")
+        return jsonify({"error": "حصل خطأ في الاتصال بالـ AI — حاول تاني"}), 500
+    return jsonify(result)
+
+
+@dashboard_bp.route("/settings/general/from-url", methods=["POST"])
+@login_required_dashboard
+def business_from_url():
+    """يقرأ رابط المتجر ويستخرج منه بيانات البزنس تلقائياً"""
+    url = (request.json.get("url") or "").strip()
+    if not url:
+        return jsonify({"error": "اكتب رابط المتجر أولاً"}), 400
+    try:
+        result = ai_assist.extract_business_from_url(url)
+    except Exception as e:
+        print(f"⚠️ business_from_url error: {e}")
+        return jsonify({"error": "حصل خطأ أثناء قراءة الموقع — حاول تاني"}), 500
+    if result.get("error"):
+        return jsonify(result), 400
     return jsonify(result)
 
 

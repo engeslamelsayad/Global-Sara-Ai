@@ -33,6 +33,7 @@ def _ask_json(prompt, max_tokens=800):
     )
     raw = response.content[0].text.strip()
     raw = raw.replace("```json", "").replace("```", "").strip()
+    truncated = getattr(response, "stop_reason", None) == "max_tokens"
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
@@ -44,7 +45,12 @@ def _ask_json(prompt, max_tokens=800):
             return json.loads(raw[start:end + 1])
         except json.JSONDecodeError:
             pass
-    return {"error": "تعذّر تحليل رد الذكاء الاصطناعي", "raw": raw}
+    if truncated:
+        print(f"⚠️ _ask_json: الرد اتقطع (max_tokens={max_tokens})")
+        return {"error": "الرد كان طويل جداً — جرّب تختصر النص شوية وحاول تاني",
+                "raw": raw[:400]}
+    print(f"⚠️ _ask_json parse failed: {raw[:200]}")
+    return {"error": "تعذّر تحليل رد الذكاء الاصطناعي", "raw": raw[:400]}
 
 
 # =====================================================================
@@ -54,6 +60,7 @@ def suggest_bot_persona(business_description, industry="", dialect="مصري"):
     """
     مدخل: "بنبيع منتجات عناية بالشعر طبيعية للستات"
     مخرج: persona + tone + اسم مقترح + أمثلة جمل افتتاحية
+           + كلمات وافتتاحيات ممنوعة مخصصة للهجة المختارة
     """
     prompt = f"""بزنس صاحبه وصفه كده:
 "{business_description}"
@@ -65,10 +72,24 @@ def suggest_bot_persona(business_description, industry="", dialect="مصري"):
   "suggested_bot_name": "اسم أنثوي بسيط مناسب للهجة",
   "suggested_age": رقم بين 22 و35,
   "suggested_persona": "وصف شخصية في جملة أو جملتين بنفس لغة الوصف المُدخل",
-  "suggested_tone": "نبرة الصوت المناسبة (مثل: ودود وعملي / رسمي ومحترف / مرح وحماسي)",
-  "example_greeting": "مثال على رسالة ترحيب بنفس اللهجة المطلوبة"
-}}"""
-    return _ask_json(prompt)
+  "suggested_tone": "نبرة الصوت في 3-5 كلمات فقط (مثل: ودود وعملي / رسمي ومحترف / مرح وحماسي)",
+  "example_greeting": "مثال على رسالة ترحيب بنفس اللهجة المطلوبة",
+  "suggested_forbidden_words": ["كلمة1", "كلمة2"],
+  "suggested_forbidden_openers": ["جملة بداية ضعيفة 1", "جملة بداية ضعيفة 2"]
+}}
+
+قواعد مهمة:
+- "suggested_tone": لازم يكون قصير جداً (3-5 كلمات) — مش جملة طويلة.
+- "suggested_forbidden_words": كلمات من **لهجات تانية** غير «{dialect}» عشان البوت مايخلطش.
+  مثال لو اللهجة مصري: كلمات شامية/خليجية زي (هلق، شو، هيك، منيح، وش، أبغى، الحين، زين).
+  مثال لو اللهجة سعودي أو إماراتي أو خليجي: كلمات مصرية زي (إيه، إزاي، دلوقتي، أوي، خالص، عايز).
+  مثال لو اللهجة شامي: كلمات مصرية وخليجية.
+  ضيف كمان أي كلمات رسمية/فصحى جامدة مش مناسبة للبيع بلهجة «{dialect}».
+  من 6 لـ 12 كلمة.
+- "suggested_forbidden_openers": جمل بداية ضعيفة أو مستهلكة تخلي الرد يبان آلي أو بارد،
+  بلهجة «{dialect}» نفسها. أمثلة للفكرة: "أهلاً بحضرتك في خدمتك"، "كيف يمكنني مساعدتك؟"،
+  "شكراً لتواصلك معنا". من 3 لـ 5 جمل مناسبة للهجة «{dialect}» والبزنس ده."""
+    return _ask_json(prompt, max_tokens=2000)
 
 
 # =====================================================================
@@ -173,8 +194,10 @@ def review_business_description(raw_description):
     يساعد مالك البزنس وهو بيكتب الوصف لأول مرة — يديله أمثلة وأسئلة توضيحية
     لو الوصف ناقص أو مختصر جداً
     """
+    # حد أقصى للمدخل — الأوصاف الطويلة جداً بتستهلك tokens من غير فايدة
+    desc = (raw_description or "").strip()[:2500]
     prompt = f"""مالك بزنس كتب الوصف ده عن شركته في خطوة إعداد البوت:
-"{raw_description}"
+"{desc}"
 
 قيّم هل الوصف كافي عشان نبني عليه بوت مبيعات ذكي، ولو ناقص اقترح أسئلة توضيحية.
 رد بصيغة JSON بالضبط بهذا الشكل:
@@ -183,15 +206,17 @@ def review_business_description(raw_description):
   "missing_points": ["نقطة ناقصة 1", "نقطة ناقصة 2"] أو [] لو كافي,
   "clarifying_questions": ["سؤال 1 يساعده يوضح أكتر", "سؤال 2"] أو [],
   "improved_example": "نسخة محسّنة ومقترحة من نفس الوصف، بنفس لغته، أوضح وأشمل"
-}}"""
-    return _ask_json(prompt)
+}}
+مهم: أقصى 4 نقاط ناقصة و3 أسئلة. الـ improved_example يكون منظم ومختصر (أقل من 1200 حرف)."""
+    # tokens أعلى: الوصف المحسّن ممكن يكون طويل، والعربي بياخد tokens أكتر
+    return _ask_json(prompt, max_tokens=4000)
 
 
 # =====================================================================
 # 6) استخراج بيانات المنتج من رابط الـ Landing Page
 # =====================================================================
 def _fetch_page_text(url, max_chars=4000):
-    """يجلب نص الصفحة ويجرّدها من الـ HTML"""
+    """يجلب نص الصفحة ويجرّدها من الـ HTML. بيرجّع str أو None عند الفشل."""
     try:
         resp = _requests.get(url, timeout=15, headers={
             "User-Agent": "Mozilla/5.0 (compatible; ProductBot/1.0)"
@@ -204,7 +229,57 @@ def _fetch_page_text(url, max_chars=4000):
         text = re.sub(r"\s+", " ", text).strip()
         return text[:max_chars]
     except Exception as e:
-        return None, str(e)
+        print(f"⚠️ _fetch_page_text error ({url}): {e}")
+        return None
+
+
+def extract_business_from_url(store_url, dialect="مصري"):
+    """
+    يقرأ صفحة المتجر ويستخرج منها بيانات البزنس تلقائياً:
+    اسم البزنس + المجال + وصف شامل (بيبيعوا إيه / لمين / إيه اللي يميزهم).
+    بيرجّع dict فيه business_name / industry / business_description
+    أو {"error": ...} لو فشل.
+    """
+    url = (store_url or "").strip()
+    if not url:
+        return {"error": "اكتب رابط المتجر أولاً"}
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+
+    text = _fetch_page_text(url, max_chars=6000)
+    if not text or len(text) < 80:
+        return {"error": "مش قادر أقرأ الصفحة دي — تأكد إن الرابط شغّال وعام (مش محتاج تسجيل دخول)"}
+
+    prompt = f"""ده محتوى صفحة متجر إلكتروني:
+---
+{text}
+---
+
+استخرج منه بيانات البزنس دي بدقة (بلهجة {dialect} طبيعية):
+
+1. اسم البزنس (زي ما هو مكتوب في الموقع بالظبط)
+2. المجال/الصناعة (كلمتين أو تلاتة — مثال: "مفروشات منزلية"، "منتجات طبية طبيعية")
+3. وصف شامل منظّم في 3 أقسام بالظبط بالعناوين دي:
+   "بيبيعوا إيه؟" — المنتجات والفئات بالتفصيل
+   "لمين؟" — الفئة المستهدفة ومستوى الأسعار
+   "إيه اللي يميزهم؟" — نقاط التميز، العروض، الخدمة
+
+رد بصيغة JSON فقط:
+{{
+  "business_name": "الاسم",
+  "industry": "المجال",
+  "business_description": "بيبيعوا إيه؟\\n...\\n\\nلمين؟\\n...\\n\\nإيه اللي يميزهم؟\\n..."
+}}
+
+مهم: اعتمد على محتوى الصفحة بس، ماتخترعش معلومات. لو معلومة مش موجودة سيب مكانها فاضي.
+الوصف يكون أقل من 1200 حرف."""
+
+    result = _ask_json(prompt, max_tokens=4000)
+    if result.get("error"):
+        return result
+    if not result.get("business_description"):
+        return {"error": "الصفحة مافيهاش معلومات كافية عن البزنس — جرّب رابط الصفحة الرئيسية أو صفحة 'من نحن'"}
+    return result
 
 
 def suggest_product_from_url(url, business_description="", dialect="مصري"):

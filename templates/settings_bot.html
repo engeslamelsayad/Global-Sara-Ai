@@ -8,7 +8,7 @@
 
 <form method="POST" class="card">
   <h3>الهوية</h3>
-  <button type="button" class="btn-ai" onclick="suggestPersona()">✨ اقترح شخصية مناسبة لبزنسي</button>
+  <button type="button" class="btn-ai" onclick="suggestPersona(this)">✨ اقترح شخصية مناسبة لبزنسي</button>
   <div id="ai-persona-result" class="ai-box"></div>
 
   <div style="display:grid; grid-template-columns:2fr 1fr; gap:14px">
@@ -67,10 +67,10 @@
   </div>
 
   <label>كلمات ممنوعة <span class="hint">مفصولة بفاصلة — لهجات أو كلمات مش مناسبة لبزنسك</span></label>
-  <input type="text" name="forbidden_words" value="{{ forbidden_words }}" placeholder="كيفك, فيك, شو">
+  <input type="text" name="forbidden_words" id="f-forbidden-words" value="{{ forbidden_words }}" placeholder="كيفك, فيك, شو">
 
   <label>افتتاحيات ممنوعة <span class="hint">كل جملة في سطر — جمل بداية ضعيفة ممنوع البوت يستخدمها</span></label>
-  <textarea name="forbidden_openers">{{ forbidden_openers }}</textarea>
+  <textarea name="forbidden_openers" id="f-forbidden-openers">{{ forbidden_openers }}</textarea>
 
   <h3 style="margin-top:24px">🎯 العروض الديناميكية</h3>
   <p class="helper-text" style="margin-bottom:12px">عروض تلقائية ذكية بتظهر في اللحظة المناسبة لإنقاذ البيعة وزيادة قيمة الطلب</p>
@@ -141,27 +141,80 @@
 </form>
 
 <script>
-async function suggestPersona(){
-  const btn = event.target; const box = document.getElementById('ai-persona-result');
+// تخزين آمن للقيم المقترحة (بدل حقنها في onclick — بيكسر مع الأسطر والعلامات)
+let _sug = {};
+function esc(s){
+  const d = document.createElement('div');
+  d.textContent = s == null ? '' : String(s);
+  return d.innerHTML;
+}
+function applySug(id, key){
+  const v = _sug[key];
+  if(v === undefined) return;
+  const el = document.getElementById(id);
+  el.value = v;
+  el.style.transition = 'background 0.3s';
+  el.style.background = '#DCFCE7';
+  setTimeout(()=> el.style.background = '', 800);
+}
+
+async function suggestPersona(btn){
+  const box = document.getElementById('ai-persona-result');
+  // اللهجة المختارة في الصفحة دلوقتي (مش المحفوظة) — الاقتراحات تتبنى عليها
+  const dialect = document.getElementById('f-dialect').value;
   btn.disabled = true; btn.textContent = '⏳ جاري التفكير...';
   try{
-    const res = await fetch("{{ url_for('dashboard.ai_suggest_persona') }}", {method:'POST'});
+    const res = await fetch("{{ url_for('dashboard.ai_suggest_persona') }}", {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({dialect: dialect})
+    });
     const data = await res.json();
     if(data.error){ alert(data.error); return; }
-    box.innerHTML = `
-      <div class="ai-title">✨ اقتراحات الشخصية</div>
-      <div class="ai-suggestion-item"><div class="label">الاسم</div>${data.suggested_bot_name}
-        <span class="ai-apply-btn" onclick="applyField('f-bot-name', \`${data.suggested_bot_name}\`)">تطبيق ←</span></div>
-      <div class="ai-suggestion-item"><div class="label">العمر</div>${data.suggested_age}
-        <span class="ai-apply-btn" onclick="applyField('f-bot-age', \`${data.suggested_age}\`)">تطبيق ←</span></div>
-      <div class="ai-suggestion-item"><div class="label">الشخصية</div>${data.suggested_persona}
-        <span class="ai-apply-btn" onclick="applyField('f-bot-persona', \`${data.suggested_persona}\`)">تطبيق ←</span></div>
-      <div class="ai-suggestion-item"><div class="label">النبرة</div>${data.suggested_tone}
-        <span class="ai-apply-btn" onclick="applyField('f-tone', \`${data.suggested_tone}\`)">تطبيق ←</span></div>
-      <div class="ai-suggestion-item"><div class="label">مثال ترحيب</div>${data.example_greeting}</div>`;
+
+    _sug.name = data.suggested_bot_name || '';
+    _sug.age = data.suggested_age || '';
+    _sug.persona = data.suggested_persona || '';
+    _sug.tone = data.suggested_tone || '';
+    _sug.words = (data.suggested_forbidden_words || []).join(', ');
+    _sug.openers = (data.suggested_forbidden_openers || []).join('\n');
+
+    let html = `<div class="ai-title">✨ اقتراحات الشخصية <span style="font-weight:400;font-size:12px;color:#64748b">— مبنية على لهجة «${esc(dialect)}»</span></div>
+      <div class="ai-suggestion-item"><div class="label">الاسم</div>${esc(_sug.name)}
+        <span class="ai-apply-btn" onclick="applySug('f-bot-name','name')">تطبيق ←</span></div>
+      <div class="ai-suggestion-item"><div class="label">العمر</div>${esc(_sug.age)}
+        <span class="ai-apply-btn" onclick="applySug('f-bot-age','age')">تطبيق ←</span></div>
+      <div class="ai-suggestion-item"><div class="label">الشخصية</div>${esc(_sug.persona)}
+        <span class="ai-apply-btn" onclick="applySug('f-bot-persona','persona')">تطبيق ←</span></div>
+      <div class="ai-suggestion-item"><div class="label">النبرة</div>${esc(_sug.tone)}
+        <span class="ai-apply-btn" onclick="applySug('f-tone','tone')">تطبيق ←</span></div>`;
+
+    if(_sug.words){
+      html += `<div class="ai-suggestion-item"><div class="label">🚫 كلمات ممنوعة (لهجات تانية تلخبط «${esc(dialect)}»)</div>
+        <div style="font-size:13px;line-height:1.8">${esc(_sug.words)}</div>
+        <span class="ai-apply-btn" onclick="applySug('f-forbidden-words','words')">تطبيق ←</span></div>`;
+    }
+    if(_sug.openers){
+      html += `<div class="ai-suggestion-item"><div class="label">🚫 افتتاحيات ممنوعة (بدايات ضعيفة)</div>
+        <div style="white-space:pre-wrap;font-size:13px;line-height:1.8">${esc(_sug.openers)}</div>
+        <span class="ai-apply-btn" onclick="applySug('f-forbidden-openers','openers')">تطبيق ←</span></div>`;
+    }
+    html += `<div class="ai-suggestion-item"><div class="label">مثال ترحيب</div>${esc(data.example_greeting || '')}</div>
+      <div style="margin-top:12px">
+        <button type="button" class="btn btn-primary btn-sm" onclick="applyAllPersona()">✅ طبّق الكل</button>
+      </div>`;
+    box.innerHTML = html;
     box.classList.add('show');
   }catch(e){ alert('حصل خطأ، حاول تاني'); }
   finally{ btn.disabled=false; btn.textContent='✨ اقترح شخصية مناسبة لبزنسي'; }
+}
+
+function applyAllPersona(){
+  if(_sug.name) applySug('f-bot-name','name');
+  if(_sug.age) applySug('f-bot-age','age');
+  if(_sug.persona) applySug('f-bot-persona','persona');
+  if(_sug.tone) applySug('f-tone','tone');
+  if(_sug.words) applySug('f-forbidden-words','words');
+  if(_sug.openers) applySug('f-forbidden-openers','openers');
 }
 
 async function suggestObjections(){
