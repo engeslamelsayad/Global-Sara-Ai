@@ -167,6 +167,9 @@
   <a class="nav-link {{ 'active' if request.endpoint=='dashboard.followups_list' }}" href="{{ url_for('dashboard.followups_list') }}">
     <span class="nav-icon">📬</span> رسائل المتابعة
   </a>
+  <a class="nav-link {{ 'active' if request.endpoint=='dashboard.salary_campaign_page' }}" href="{{ url_for('dashboard.salary_campaign_page') }}">
+    <span class="nav-icon">💰</span> حملة المرتبات
+  </a>
   <a class="nav-link {{ 'active' if request.endpoint=='dashboard.pages_list' }}" href="{{ url_for('dashboard.pages_list') }}">
     <span class="nav-icon">🔗</span> الصفحات المربوطة
   </a>

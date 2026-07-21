@@ -1,83 +1,111 @@
 {% extends "base.html" %}
-{% block title %}حملة يوم المرتبات{% endblock %}
-
+{% block title %}حملة المرتبات{% endblock %}
 {% block content %}
-<div style="max-width:720px;margin:0 auto">
-  <h1 style="margin-bottom:4px">💰 حملة يوم المرتبات</h1>
-  <p style="color:#94a3b8;font-size:14px;margin-top:0">
+<div class="page-header">
+  <h1 class="page-title">💰 حملة يوم المرتبات</h1>
+  <p class="page-sub">
     رسالة خصم تلقائية للعملاء المهتمين اللي ماشتروش — بتتبعت في أيام نزول المرتبات
-    (مثلاً يوم 25 ويوم 1). كل عميل بياخد رسالة واحدة بس كل 20 يوم كحد أقصى.
+    (مثلاً يوم 25 وأول الشهر)
   </p>
+</div>
 
-  {% with messages = get_flashed_messages(with_categories=true) %}
-    {% for cat, m in messages %}
-      <div class="flash {{ cat }}">{{ m }}</div>
-    {% endfor %}
-  {% endwith %}
+<!-- بانر شرح الفكرة -->
+<div class="card" style="border:2px solid var(--primary); background:linear-gradient(135deg,#F5F0FE,#EDE6FB); margin-bottom:16px">
+  <h3 style="margin-top:0; color:var(--primary-dark)">💡 إزاي بتشتغل؟</h3>
+  <p style="font-size:14px; line-height:1.9; margin:0">
+    في أيام المرتبات، الفلوس بتكون موجودة والقرار أسهل. الحملة بتلاقي كل عميل
+    <b>اتفاعل خلال آخر 30 يوم</b> وماعملش أوردر، وتبعتله عرض خصم مخصص باسم المنتج
+    اللي كان بيسأل عنه.
+  </p>
+  <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:10px; margin-top:12px">
+    <div style="background:#fff; border-radius:10px; padding:12px; font-size:13px">
+      <b>🛡️ حماية من السبام</b><br>
+      <span style="color:var(--text-soft)">سرعة إرسال محدودة + كل عميل رسالة واحدة بس كل 20 يوم</span>
+    </div>
+    <div style="background:#fff; border-radius:10px; padding:12px; font-size:13px">
+      <b>🔄 متناسقة مع المتابعات</b><br>
+      <span style="color:var(--text-soft)">مش هتتبعت لعميل خد رسالة متابعة خلال آخر 24 ساعة</span>
+    </div>
+    <div style="background:#fff; border-radius:10px; padding:12px; font-size:13px">
+      <b>✍️ نصك المخصص</b><br>
+      <span style="color:var(--text-soft)">اكتب رسالتك أو سيبها فاضية — وبتدعم {product} و {discount}</span>
+    </div>
+  </div>
+</div>
 
-  <form method="POST" action="{{ url_for('dashboard.salary_campaign_save') }}"
-        style="background:#1e293b;border-radius:12px;padding:20px;display:grid;gap:16px">
+<form method="POST" action="{{ url_for('dashboard.salary_campaign_save') }}">
+  <div class="card">
 
-    <label style="display:flex;align-items:center;gap:10px;font-weight:bold">
-      <input type="checkbox" name="is_active" value="1"
+    <div class="checkbox-row" style="display:flex; align-items:center; gap:10px; margin-bottom:6px">
+      <input type="checkbox" id="is_active" name="is_active" value="1"
              {% if camp.is_active %}checked{% endif %}>
-      تفعيل الحملة
-    </label>
+      <label for="is_active" style="font-size:15px">تفعيل الحملة</label>
+    </div>
+    {% if not camp.is_active %}
+      <p style="font-size:12px; color:var(--warn); background:var(--warn-bg); border-radius:8px; padding:8px 12px; margin:0 0 10px">
+        ⏸ الحملة معطّلة حالياً — مش هيتبعت أي رسائل لحد ما تفعّلها وتحفظ
+      </p>
+    {% endif %}
 
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px">
       <div>
-        <label>أيام الشهر (مفصولة بفاصلة)</label>
+        <label>أيام الشهر <span class="hint">(مفصولة بفاصلة)</span></label>
         <input type="text" name="days_of_month" value="{{ camp.days_of_month or '25,1' }}"
-               placeholder="25,1" dir="ltr" style="width:100%">
-        <small style="color:#64748b">مثال: 25,1 — يوم 25 وأول الشهر</small>
+               placeholder="25,1" dir="ltr">
+        <p style="font-size:12px; color:var(--text-soft); margin:6px 0 0">
+          مثال: <code>25,1</code> — يوم 25 وأول الشهر (مواعيد المرتبات)
+        </p>
       </div>
       <div>
-        <label>ساعة الإرسال (بتوقيت مصر)</label>
-        <select name="send_hour" style="width:100%">
+        <label>ساعة الإرسال <span class="hint">(بتوقيت مصر)</span></label>
+        <select name="send_hour">
           {% for h in range(8, 23) %}
             <option value="{{ h }}" {% if camp.send_hour == h %}selected{% endif %}>
               {{ '%02d'|format(h) }}:00
             </option>
           {% endfor %}
         </select>
-        <small style="color:#64748b">يفضّل بعد الظهر — العميل بيكون فاضي</small>
+        <p style="font-size:12px; color:var(--text-soft); margin:6px 0 0">
+          يفضّل بعد الظهر أو المساء — العميل بيكون فاضي للرد
+        </p>
       </div>
     </div>
 
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px">
       <div>
         <label>نسبة الخصم %</label>
         <input type="number" name="discount_percent" min="0" max="90"
-               value="{{ camp.discount_percent or 10 }}" style="width:100%">
+               value="{{ camp.discount_percent or 10 }}">
       </div>
       <div>
-        <label>سرعة الإرسال (رسالة/دقيقة)</label>
+        <label>سرعة الإرسال <span class="hint">(رسالة في الدقيقة)</span></label>
         <input type="number" name="msgs_per_minute" min="1" max="60"
-               value="{{ camp.msgs_per_minute or 10 }}" style="width:100%">
-        <small style="color:#64748b">10/دقيقة آمنة جداً ضد فلاج السبام</small>
+               value="{{ camp.msgs_per_minute or 10 }}">
+        <p style="font-size:12px; color:var(--text-soft); margin:6px 0 0">
+          10 في الدقيقة آمنة جداً ضد فلاج السبام — ماتزوّدش من غير سبب
+        </p>
       </div>
     </div>
 
-    <div>
-      <label>نص الرسالة (اختياري — سيبها فاضية للرسالة الافتراضية)</label>
-      <textarea name="message_text" rows="4" style="width:100%"
-                placeholder="بيدعم {product} و {discount}">{{ camp.message_text or '' }}</textarea>
-      <small style="color:#64748b">
-        متغيرات: <code>{product}</code> اسم المنتج، <code>{discount}</code> نسبة الخصم
-      </small>
-    </div>
+    <label>نص الرسالة <span class="hint">(اختياري — سيبه فاضي لاستخدام الرسالة الافتراضية الذكية)</span></label>
+    <textarea name="message_text" rows="4"
+              placeholder="مثال: بمناسبة أول الشهر، خصم {discount}% على {product} 🎁 العرض لفترة محدودة!">{{ camp.message_text or '' }}</textarea>
+    <p style="font-size:12px; color:var(--text-soft); margin:6px 0 0">
+      متغيرات متاحة: <code>{product}</code> اسم المنتج اللي سأل عنه العميل ·
+      <code>{discount}</code> نسبة الخصم
+    </p>
 
-    <div style="background:#0f172a;border-radius:8px;padding:12px;font-size:13px;color:#94a3b8">
-      📊 آخر تشغيل: {{ camp.last_run_date or '—' }}
+    <div style="background:var(--bg); border:1px solid var(--border); border-radius:10px; padding:12px 16px; font-size:13px; color:var(--text-soft); margin-top:16px">
+      📊 <b>آخر تشغيل:</b> {{ camp.last_run_date or '— لسه ماشتغلتش' }}
       {% if camp.last_run_sent_count is not none %}
-        | اتبعتت لـ <b style="color:#22c55e">{{ camp.last_run_sent_count }}</b> عميل
+        &nbsp;|&nbsp; اتبعتت لـ <b style="color:var(--success)">{{ camp.last_run_sent_count }}</b> عميل
       {% endif %}
     </div>
 
-    <button type="submit" class="btn"
-            style="background:#7c3aed;color:#fff;padding:10px;border:none;border-radius:8px;cursor:pointer;font-size:15px">
-      💾 حفظ الإعدادات
-    </button>
-  </form>
-</div>
+    <div style="margin-top:20px">
+      <button type="submit" class="btn btn-primary">💾 حفظ الإعدادات</button>
+    </div>
+
+  </div>
+</form>
 {% endblock %}
