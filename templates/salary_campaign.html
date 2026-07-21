@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}حملة يوم المرتبات{% endblock %}
+
+{% block content %}
+<div style="max-width:720px;margin:0 auto">
+  <h1 style="margin-bottom:4px">💰 حملة يوم المرتبات</h1>
+  <p style="color:#94a3b8;font-size:14px;margin-top:0">
+    رسالة خصم تلقائية للعملاء المهتمين اللي ماشتروش — بتتبعت في أيام نزول المرتبات
+    (مثلاً يوم 25 ويوم 1). كل عميل بياخد رسالة واحدة بس كل 20 يوم كحد أقصى.
+  </p>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for cat, m in messages %}
+      <div class="flash {{ cat }}">{{ m }}</div>
+    {% endfor %}
+  {% endwith %}
+
+  <form method="POST" action="{{ url_for('dashboard.salary_campaign_save') }}"
+        style="background:#1e293b;border-radius:12px;padding:20px;display:grid;gap:16px">
+
+    <label style="display:flex;align-items:center;gap:10px;font-weight:bold">
+      <input type="checkbox" name="is_active" value="1"
+             {% if camp.is_active %}checked{% endif %}>
+      تفعيل الحملة
+    </label>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div>
+        <label>أيام الشهر (مفصولة بفاصلة)</label>
+        <input type="text" name="days_of_month" value="{{ camp.days_of_month or '25,1' }}"
+               placeholder="25,1" dir="ltr" style="width:100%">
+        <small style="color:#64748b">مثال: 25,1 — يوم 25 وأول الشهر</small>
+      </div>
+      <div>
+        <label>ساعة الإرسال (بتوقيت مصر)</label>
+        <select name="send_hour" style="width:100%">
+          {% for h in range(8, 23) %}
+            <option value="{{ h }}" {% if camp.send_hour == h %}selected{% endif %}>
+              {{ '%02d'|format(h) }}:00
+            </option>
+          {% endfor %}
+        </select>
+        <small style="color:#64748b">يفضّل بعد الظهر — العميل بيكون فاضي</small>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div>
+        <label>نسبة الخصم %</label>
+        <input type="number" name="discount_percent" min="0" max="90"
+               value="{{ camp.discount_percent or 10 }}" style="width:100%">
+      </div>
+      <div>
+        <label>سرعة الإرسال (رسالة/دقيقة)</label>
+        <input type="number" name="msgs_per_minute" min="1" max="60"
+               value="{{ camp.msgs_per_minute or 10 }}" style="width:100%">
+        <small style="color:#64748b">10/دقيقة آمنة جداً ضد فلاج السبام</small>
+      </div>
+    </div>
+
+    <div>
+      <label>نص الرسالة (اختياري — سيبها فاضية للرسالة الافتراضية)</label>
+      <textarea name="message_text" rows="4" style="width:100%"
+                placeholder="بيدعم {product} و {discount}">{{ camp.message_text or '' }}</textarea>
+      <small style="color:#64748b">
+        متغيرات: <code>{product}</code> اسم المنتج، <code>{discount}</code> نسبة الخصم
+      </small>
+    </div>
+
+    <div style="background:#0f172a;border-radius:8px;padding:12px;font-size:13px;color:#94a3b8">
+      📊 آخر تشغيل: {{ camp.last_run_date or '—' }}
+      {% if camp.last_run_sent_count is not none %}
+        | اتبعتت لـ <b style="color:#22c55e">{{ camp.last_run_sent_count }}</b> عميل
+      {% endif %}
+    </div>
+
+    <button type="submit" class="btn"
+            style="background:#7c3aed;color:#fff;padding:10px;border:none;border-radius:8px;cursor:pointer;font-size:15px">
+      💾 حفظ الإعدادات
+    </button>
+  </form>
+</div>
+{% endblock %}

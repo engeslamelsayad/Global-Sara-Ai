@@ -266,6 +266,28 @@ def run(flask_app=None):
             print(f"  ⚠️ model default switch: {e}")
             ok_all = False
 
+        print("\n=== 10. حملة يوم المرتبات — صف افتراضي لكل tenant ===")
+        # الجدول نفسه بيتعمل من db.create_all() (جدول جديد مش عمود جديد).
+        # هنا بنزرع بس صف افتراضي **معطّل** لكل tenant عشان صفحة الداشبورد
+        # تلاقي إعدادات تعرضها — التاجر هو اللي بيفعّل الحملة بنفسه.
+        try:
+            from models import Tenant, SalaryCampaign
+            seeded = 0
+            for tenant in Tenant.query.all():
+                if SalaryCampaign.query.filter_by(tenant_id=tenant.id).first():
+                    continue
+                db.session.add(SalaryCampaign(tenant_id=tenant.id))
+                seeded += 1
+            if seeded:
+                db.session.commit()
+                print(f"  ✅ اتضافت حملة مرتبات افتراضية (معطّلة) لـ {seeded} tenant")
+            else:
+                print("  ⏭  كل الـ tenants عندهم حملة مرتبات بالفعل")
+        except Exception as e:
+            db.session.rollback()
+            print(f"  ⚠️ salary campaign seed: {e}")
+            ok_all = False
+
         # مفيش conn.commit() هنا — كل أمر بيعمل commit لوحده في safe_alter
         conn.close()
 

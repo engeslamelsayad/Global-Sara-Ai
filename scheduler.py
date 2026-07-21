@@ -89,7 +89,7 @@ def _send_weekly_reports(app):
 def _scheduler_loop(app):
     """الحلقة الرئيسية — بتشتغل طول عمر التطبيق"""
     global _last_report_date
-    print("🕐 Scheduler started (Telegram + Smart Recovery followups)")
+    print("🕐 Scheduler started (Telegram + Smart Recovery + Salary campaigns)")
 
     loop_count = 0
 
@@ -109,6 +109,15 @@ def _scheduler_loop(app):
                     recovery.run_followups(app)
                 except Exception as e:
                     print(f"⚠️ Recovery error: {e}")
+
+            # 2.5) حملة يوم المرتبات — فحص كل دورة (query واحدة رخيصة).
+            # الحملة الفعلية بتشتغل في thread منفصل جواها، فالـ rate
+            # limiting (sleep بين الرسائل) مش بيعطّل الحلقة دي.
+            try:
+                import salary_campaign
+                salary_campaign.check_and_run(app)
+            except Exception as e:
+                print(f"⚠️ Salary campaign error: {e}")
 
             # 3) التقرير الأسبوعي — سبت 9ص مصر (7 UTC)
             is_report_time = (

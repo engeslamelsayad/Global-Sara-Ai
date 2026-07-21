@@ -255,6 +255,37 @@ class FollowupStage(db.Model):
 
 
 # =====================================================================
+# SALARY_CAMPAIGN — حملة يوم المرتبات (25 وأول الشهر)
+# =====================================================================
+class SalaryCampaign(db.Model):
+    __tablename__ = "salary_campaigns"
+    __table_args__ = (UniqueConstraint("tenant_id", name="uq_tenant_salary_campaign"),)
+
+    id                  = db.Column(db.String(36), primary_key=True, default=gen_uuid)
+    tenant_id           = db.Column(db.String(36), db.ForeignKey("tenants.id"),
+                                    nullable=False, index=True)
+    days_of_month       = db.Column(db.String(40), default="25,1")
+    send_hour           = db.Column(db.Integer, default=14)      # بتوقيت مصر
+    discount_percent    = db.Column(db.Integer, default=10)
+    message_text        = db.Column(db.Text, default="")
+    msgs_per_minute     = db.Column(db.Integer, default=10)      # rate limit
+    is_active           = db.Column(db.Boolean, default=False)   # معطّلة افتراضياً
+    last_run_date       = db.Column(db.String(10))               # "2026-07-25"
+    last_run_sent_count = db.Column(db.Integer)
+
+    def to_dict(self):
+        return {
+            "id": self.id, "days_of_month": self.days_of_month,
+            "send_hour": self.send_hour,
+            "discount_percent": self.discount_percent,
+            "message_text": self.message_text,
+            "msgs_per_minute": self.msgs_per_minute,
+            "is_active": self.is_active,
+            "last_run_date": self.last_run_date,
+        }
+
+
+# =====================================================================
 # PRODUCT
 # =====================================================================
 class Product(db.Model):

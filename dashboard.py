@@ -14,7 +14,7 @@ from flask_login import login_required, current_user
 
 from models import (
     db, Tenant, Product, Policy, BotConfig, Keyword, BotAppId,
-    FollowupStage, Page, Order, SmartRule, MetaLabel,
+    FollowupStage, Page, Order, SmartRule, MetaLabel, SalaryCampaign,
 )
 from auth import login_required_dashboard
 from bot_engine import invalidate_tenant_cache
@@ -773,6 +773,56 @@ def followup_toggle(stage_id):
     db.session.commit()
     _invalidate(tenant)
     return redirect(url_for("dashboard.followups_list"))
+
+
+# =====================================================================
+# SALARY CAMPAIGN — حملة يوم المرتبات
+# =====================================================================
+@dashboard_bp.route("/salary-campaign")
+@login_required_dashboard
+def salary_campaign_page():
+    tenant = _current_tenant()
+    camp = SalaryCampaign.query.filter_by(tenant_id=tenant.id).first()
+    if not camp:
+        # الحسابات القديمة اللي الـ seed مالحقهاش — ننشئ صف افتراضي (معطّل)
+        camp = SalaryCampaign(tenant_id=tenant.id)
+        db.session.add(camp)
+        db.session.commit()
+    return render_template("salary_campaign.html", tenant=tenant, camp=camp)
+
+
+@dashboard_bp.route("/salary-campaign/save", methods=["POST"])
+@login_required_dashboard
+def salary_campaign_save():
+    tenant = _current_tenant()
+    camp = SalaryCampaign.query.filter_by(tenant_id=tenant.id).first_or_404()
+
+    # تنظيف أيام الشهر: أرقام 1-31 بس، من غير تكرار (بندعم الفاصلة العربية كمان)
+    raw_days = request.form.get("days_of_month", "25,1")
+    days = []
+    for part in raw_days.replace("،", ",").split(","):
+        part = part.strip()
+        if part.isdigit() and 1 <= int(part) <= 31 and int(part) not in days:
+            days.append(int(part))
+    if not days:
+        days = [25, 1]
+
+    def _int_form(name, default, lo, hi):
+        try:
+            return min(max(int(request.form.get(name, default)), lo), hi)
+        except (TypeError, ValueError):
+            return default
+
+    camp.days_of_month    = ",".join(str(d) for d in days)
+    camp.send_hour        = _int_form("send_hour", 14, 0, 23)
+    camp.discount_percent = _int_form("discount_percent", 10, 0, 90)
+    camp.msgs_per_minute  = _int_form("msgs_per_minute", 10, 1, 60)
+    camp.message_text     = request.form.get("message_text", "").strip()
+    camp.is_active        = request.form.get("is_active") == "1"
+
+    db.session.commit()
+    flash("تم حفظ إعدادات حملة المرتبات ✅", "success")
+    return redirect(url_for("dashboard.salary_campaign_page"))
 
 
 # =====================================================================
