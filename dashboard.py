@@ -1099,6 +1099,86 @@ def telegram_test():
 
 
 # =====================================================================
+# HANDOFFS — المحادثات المتوقفة (البوت ساكت فيها)
+# =====================================================================
+@dashboard_bp.route("/handoffs")
+@login_required_dashboard
+def handoffs_list():
+    tenant = _current_tenant()
+    from bot_engine import list_tenant_states_with_ids
+    import time as _t
+
+    rows = []
+    for sender_id, st in list_tenant_states_with_ids(tenant.id):
+        if not st.get("is_human_handoff"):
+            continue
+        last_user_msg = next(
+            (h.get("content", "") for h in reversed(st.get("history", []))
+             if h.get("role") == "user"), "")
+        ts = st.get("handoff_time") or st.get("last_message") or 0
+        ago_h = (_t.time() - ts) / 3600 if ts else None
+        if ago_h is None:
+            ago = "—"
+        elif ago_h < 1:
+            ago = f"من {int(ago_h * 60)} دقيقة"
+        elif ago_h < 48:
+            ago = f"من {int(ago_h)} ساعة"
+        else:
+            ago = f"من {int(ago_h / 24)} يوم"
+        rows.append({
+            "sender_id": sender_id,
+            "reason": st.get("handoff_reason") or "غير مسجّل (قبل التحديث)",
+            "last_user_msg": last_user_msg[:90],
+            "ago": ago,
+            "sort_ts": ts,
+        })
+    rows.sort(key=lambda r: r["sort_ts"], reverse=True)
+    return render_template("handoffs.html", tenant=tenant, rows=rows)
+
+
+@dashboard_bp.route("/handoffs/release", methods=["POST"])
+@login_required_dashboard
+def handoff_release():
+    """يرجّع البوت لمحادثة واحدة"""
+    tenant = _current_tenant()
+    sender_id = (request.form.get("sender_id") or "").strip()
+    from bot_engine import load_state, save_state
+    st = load_state(tenant.id, sender_id) if sender_id else None
+    if st and st.get("is_human_handoff"):
+        st["is_human_handoff"] = False
+        st.pop("handoff_reason", None)
+        st.pop("handoff_time", None)
+        if st.get("stage") == "HUMAN_NEEDED":
+            st["stage"] = "INQUIRY"
+        save_state(tenant.id, sender_id, st)
+        flash("رجع البوت للمحادثة دي ✅ — هيرد على رسالة العميل الجاية", "success")
+    else:
+        flash("المحادثة مش موجودة أو البوت شغال فيها بالفعل", "error")
+    return redirect(url_for("dashboard.handoffs_list"))
+
+
+@dashboard_bp.route("/handoffs/release-all", methods=["POST"])
+@login_required_dashboard
+def handoff_release_all():
+    """يرجّع البوت لكل المحادثات المتوقفة"""
+    tenant = _current_tenant()
+    from bot_engine import list_tenant_states_with_ids, save_state
+    released = 0
+    for sender_id, st in list_tenant_states_with_ids(tenant.id):
+        if not st.get("is_human_handoff"):
+            continue
+        st["is_human_handoff"] = False
+        st.pop("handoff_reason", None)
+        st.pop("handoff_time", None)
+        if st.get("stage") == "HUMAN_NEEDED":
+            st["stage"] = "INQUIRY"
+        save_state(tenant.id, sender_id, st)
+        released += 1
+    flash(f"رجع البوت لـ {released} محادثة ✅", "success")
+    return redirect(url_for("dashboard.handoffs_list"))
+
+
+# =====================================================================
 # PROFILE — مفتاح التحليلات
 # =====================================================================
 @dashboard_bp.route("/profile", methods=["GET", "POST"])

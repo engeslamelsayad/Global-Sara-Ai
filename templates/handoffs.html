@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}المحادثات المتوقفة{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">🙋 المحادثات المتوقفة</h1>
+  <p class="page-sub">
+    البوت ساكت في المحادثات دي — إما لأن العميل طلب موظف، أو لأن موديريتور رد من الإنبوكس.
+    رجّع البوت لما الموضوع يخلص عشان مايسيبش العميل من غير رد.
+  </p>
+</div>
+
+{% if rows %}
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px">
+    <span style="font-size:14px; color:var(--text-soft)">
+      <b style="color:var(--danger)">{{ rows|length }}</b> محادثة البوت متوقف فيها
+    </span>
+    <form method="POST" action="{{ url_for('dashboard.handoff_release_all') }}" style="display:inline"
+          onsubmit="return confirm('هيرجع البوت يرد في كل المحادثات المتوقفة ({{ rows|length }}) — متأكد؟ اتأكد الأول إن مفيش موديريتور شغال مع عميل فيهم دلوقتي.')">
+      <button class="btn btn-secondary btn-sm" type="submit">🔄 رجّع البوت للكل</button>
+    </form>
+  </div>
+
+  {% for r in rows %}
+  <div style="border:1px solid var(--border); border-radius:12px; padding:14px 16px; margin-bottom:10px">
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap">
+      <div style="min-width:0">
+        <div style="font-size:13px; margin-bottom:4px">
+          <span style="background:var(--warn-bg); color:var(--warn); border-radius:6px; padding:2px 8px; font-weight:700">
+            ⏸ {{ r.reason }}
+          </span>
+          <span style="color:var(--text-soft); margin-right:8px">{{ r.ago }}</span>
+        </div>
+        {% if r.last_user_msg %}
+        <div style="font-size:13px; color:var(--text)">
+          آخر رسالة من العميل: «{{ r.last_user_msg }}{% if r.last_user_msg|length >= 90 %}…{% endif %}»
+        </div>
+        {% endif %}
+        <div style="font-size:11px; color:var(--text-soft); direction:ltr; text-align:left; font-family:monospace">
+          {{ r.sender_id }}
+        </div>
+      </div>
+      <form method="POST" action="{{ url_for('dashboard.handoff_release') }}" style="flex-shrink:0">
+        <input type="hidden" name="sender_id" value="{{ r.sender_id }}">
+        <button class="btn btn-primary btn-sm" type="submit">▶️ رجّع البوت</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card">
+  <div class="empty-state">
+    <p>✅ مفيش محادثات متوقفة — البوت شغال مع كل العملاء</p>
+  </div>
+</div>
+{% endif %}
+
+<div class="card" style="background:var(--bg)">
+  <h3 style="margin-top:0; font-size:15px">💡 إزاي المحادثة بتتوقف أصلاً؟</h3>
+  <p style="font-size:13px; color:var(--text-soft); line-height:1.9; margin:0">
+    <b>1)</b> العميل كتب كلمة من كلمات "طلب موظف بشري" → البوت بيقوله إن موظف جاي وبيسكت.
+    <b>2)</b> موديريتور رد على العميل من إنبوكس الصفحة مباشرة → البوت بيسكت تلقائياً عشان مايتداخلش.
+    في الحالتين البوت مش بيرجع لوحده — بترجّعه من هنا لما الموضوع يخلص.
+  </p>
+</div>
+{% endblock %}

@@ -594,6 +594,15 @@ def matches_category(message, keywords, category):
     )
 
 
+def matched_keyword(message, keywords, category):
+    """يرجّع أول كلمة مفتاحية اتطابقت (للتشخيص) أو None"""
+    msg_lower = message.lower()
+    for kw in keywords:
+        if kw.category == category and kw.value.lower() in msg_lower:
+            return kw.value
+    return None
+
+
 def get_closing_reactions(bc):
     try:
         return set(json.loads(bc.closing_reactions or "[]"))
@@ -929,11 +938,23 @@ def save_order(tenant, order_data, page_id):
 # =====================================================================
 # MESSAGE SENDING (Facebook/Instagram)
 # =====================================================================
+# تتبع آخر إرسال من البوت لكل عميل — بيساعد handle_echo يفرّق بين
+# صدى رسالة البوت نفسه ورد الموديريتور البشري
+_recent_bot_sends = {}   # {(tenant_id, sender_id): timestamp}
+
+
 def send_message(bundle, sender_id, text, page_id, platform):
     page = bundle["pages"].get(page_id)
     if not page or not page.access_token:
         print(f"❌ No access token for page {page_id}")
         return
+    _recent_bot_sends[(bundle["tenant"].id, sender_id)] = time.time()
+    # تنظيف دوري للقاموس (نحتفظ بآخر ساعة بس)
+    if len(_recent_bot_sends) > 5000:
+        cutoff = time.time() - 3600
+        for k in list(_recent_bot_sends.keys()):
+            if _recent_bot_sends[k] < cutoff:
+                _recent_bot_sends.pop(k, None)
     try:
         requests.post(
             "https://graph.facebook.com/v18.0/me/messages",
@@ -1290,9 +1311,13 @@ def do_process_message(tenant_id, sender_id, user_message, page_id, platform,
         save_state(tenant_id, sender_id, state)
         return
 
-    if matches_category(user_message, keywords, "human"):
+    _human_kw = matched_keyword(user_message, keywords, "human")
+    if _human_kw:
         state["is_human_handoff"] = True
         state["stage"] = "HUMAN_NEEDED"
+        state["handoff_reason"] = f"طلب موظف (كلمة: «{_human_kw}»)"
+        state["handoff_time"] = time.time()
+        print(f"🙋 Human keyword matched: «{_human_kw}» in message from {sender_id}")
         send_message(bundle, sender_id,
             "تمام! هبعتلك موظف متخصص دلوقتي. لحظة صغيرة ومحدش هيسيبك وحدك 💙",
             page_id, platform)
@@ -1463,6 +1488,11 @@ def handle_echo(bundle, event):
     يُستدعى لما الـ webhook event يكون is_echo=True
     لو الـ app_id مش في قائمة bot_app_ids بتاعة الـ tenant → موديريتور بشري رد
     → نوقف البوت لهذا العميل فوراً عشان منعش يحصل تداخل في الكلام
+
+    🛡️ حماية من الإيقاف الذاتي: لو جدول bot_app_ids فاضي (tenant جديد)،
+    صدى رسالة البوت نفسه كان بيتفسّر كرد موديريتور والبوت بيوقّف نفسه
+    بعد أول رد. الحل: لو نص الصدى مطابق لآخر ردود البوت في تاريخ المحادثة
+    → ده صدانا احنا → نسجّل الـ app_id تلقائياً ونكمل عادي.
     """
     tenant_id = bundle["tenant"].id
     echo_app_id = str(event["message"].get("app_id", "0"))
@@ -1472,15 +1502,53 @@ def handle_echo(bundle, event):
         return   # ده رد البوت نفسه — تجاهل عادي
 
     user_psid = event["recipient"]["id"]
+    echo_text = (event["message"].get("text") or "").strip()
     state = load_state(tenant_id, user_psid)
+
+    # ── 🤖 التعرف الذاتي: هل ده صدى رسالة بعتها البوت بنفسه؟ ──
+    # أقوى دليل: نص الصدى مطابق حرفياً لواحدة من آخر ردود البوت للعميل ده
+    if state and echo_text:
+        recent_bot_msgs = {h.get("content", "").strip()
+                           for h in state.get("history", [])[-8:]
+                           if h.get("role") == "assistant"}
+        if echo_text in recent_bot_msgs:
+            _register_bot_app_id(tenant_id, echo_app_id)
+            return
+
+    # صدى من غير نص (صورة منتج مثلاً) وصل خلال ثواني من إرسال البوت؟
+    # مانسجلش الـ app_id (دليل أضعف) — بس مانوقفش البوت برضه
+    if not echo_text:
+        sent_ts = _recent_bot_sends.get((tenant_id, user_psid), 0)
+        if time.time() - sent_ts < 15:
+            return
+
+    # ── 🙋 موديريتور بشري فعلاً → إيقاف البوت لهذا العميل ──
     if not state:
         # الموديريتور رد قبل ما البوت يتفاعل مع العميل (أو حالة جديدة) —
         # ننشئ سجل كامل عشان الإيقاف يتسجّل ويتحفظ دايماً، مش يتجاهل
         page_id = str(event["sender"].get("id", ""))
         state = default_state(tenant_id, page_id, "facebook")
     state["is_human_handoff"] = True
+    state["handoff_reason"] = f"رد موديريتور من الإنبوكس (app={echo_app_id})"
+    state["handoff_time"] = time.time()
     save_state(tenant_id, user_psid, state)
     print(f"🙋 Moderator echo (app={echo_app_id}) → bot paused for {user_psid}")
+
+
+def _register_bot_app_id(tenant_id, app_id):
+    """يسجّل app_id جديد للبوت تلقائياً (idempotent) ويفضّي الكاش"""
+    from models import BotAppId
+    try:
+        exists = BotAppId.query.filter_by(tenant_id=tenant_id, app_id=app_id).first()
+        if not exists:
+            db.session.add(BotAppId(tenant_id=tenant_id, app_id=app_id,
+                                    label="اتسجل تلقائياً (صدى رسالة البوت)"))
+            db.session.commit()
+            invalidate_tenant_cache()   # الـ bundle المكاشّ فيه القائمة القديمة
+            print(f"🤖 Auto-registered bot app_id {app_id} for tenant {tenant_id}")
+    except Exception as e:
+        db.session.rollback()
+        print(f"⚠️ Failed to auto-register app_id {app_id}: {e}")
 
 
 # =====================================================================
