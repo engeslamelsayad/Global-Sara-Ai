@@ -97,6 +97,11 @@ def run():
         n_lbl = default_keywords.seed_labels_for_tenant(db, MetaLabel, tenant.id)
         print(f"   ✅ {n_lbl} تصنيف افتراضي")
 
+        # ── سلّم المتابعات الافتراضي (4 مراحل ديناميكية) ──
+        from models import FollowupStage
+        n_fu = default_keywords.seed_followup_stages_for_tenant(db, FollowupStage, tenant.id)
+        print(f"   ✅ {n_fu} مراحل متابعة افتراضية (6h/24h/24h+خصم/48h+خصم)")
+
         # ── المستخدم الأول ──
         user = User(
             tenant_id=tenant.id,

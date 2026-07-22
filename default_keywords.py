@@ -130,3 +130,40 @@ def seed_labels_for_tenant(db, MetaLabel, tenant_id, skip_existing=True):
                                  trigger_stage=stage, is_active=True))
         added += 1
     return added
+
+
+# ═══════════════════════════════════════════════════════════════════
+# سلّم المتابعات الافتراضي (4 مراحل ديناميكية)
+# النصوص فاضية عمداً — الـ Smart Recovery بيبني الرسالة المخصصة
+# حسب سبب توقف كل عميل (شاف السعر وسكت / اعترض / كان مهتم).
+# ═══════════════════════════════════════════════════════════════════
+DEFAULT_FOLLOWUP_STAGES = [
+    # (رقم المرحلة، ساعات بعد آخر تفاعل، نسبة الخصم)
+    (1, 6,  0),    # نكزة ودّية بعد 6 ساعات
+    (2, 24, 0),    # رسالة قيمة بعد 24 ساعة
+    (3, 24, 10),   # خصم 10% بعد 24 ساعة إضافية
+    (4, 48, 10),   # آخر فرصة بعد 48 ساعة
+]
+
+
+def seed_followup_stages_for_tenant(db, FollowupStage, tenant_id):
+    """
+    يزرع مراحل المتابعة الافتراضية الناقصة بس (بأرقامها).
+    اللي التاجر عدّله أو ضافه بنفسه مابنلمسوش. بيرجّع عدد اللي اتضاف.
+    آمن للتكرار (idempotent) — بيتستخدم في:
+      create_tenant.py (حسابات جديدة) + migrate_add_columns.py (backfill)
+      + زر "استعادة المراحل الافتراضية" في الداشبورد.
+    """
+    existing_nums = {s.stage_number for s in
+                     FollowupStage.query.filter_by(tenant_id=tenant_id).all()}
+    added = 0
+    for num, hours, discount in DEFAULT_FOLLOWUP_STAGES:
+        if num in existing_nums:
+            continue
+        db.session.add(FollowupStage(
+            tenant_id=tenant_id, stage_number=num,
+            hours_after_last=hours, message_text="",
+            discount_percent=discount,
+        ))
+        added += 1
+    return added

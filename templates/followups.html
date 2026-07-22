@@ -34,6 +34,15 @@
 </div>
 
 <div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px">
+    <h3 style="margin:0">مراحل السلّم الحالية</h3>
+    <form method="POST" action="{{ url_for('dashboard.followup_restore_defaults') }}" style="display:inline">
+      <button class="btn btn-secondary btn-sm" type="submit"
+              title="يرجّع المراحل الافتراضية الأربعة (6h / 24h / 24h+خصم / 48h+خصم) — بيضيف الناقص بس ومش بيلمس اللي انت عدّلته">
+        🔄 استعادة المراحل الافتراضية
+      </button>
+    </form>
+  </div>
   {% if stages %}
     {% for s in stages %}
     <div style="border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:12px; {{ 'opacity:0.5' if not s.is_active }}">
@@ -54,7 +63,10 @@
     </div>
     {% endfor %}
   {% else %}
-    <div class="empty-state"><p>لسه مفيش مراحل متابعة. أضف أول مرحلة تحت 👇</p></div>
+    <div class="empty-state">
+      <p>لسه مفيش مراحل متابعة. اضغط <b>«🔄 استعادة المراحل الافتراضية»</b> فوق
+      عشان تضيف السلّم الجاهز (4 مراحل)، أو أضف مرحلة يدوياً تحت 👇</p>
+    </div>
   {% endif %}
 </div>
 

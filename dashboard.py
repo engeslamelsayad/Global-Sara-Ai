@@ -775,6 +775,26 @@ def followup_toggle(stage_id):
     return redirect(url_for("dashboard.followups_list"))
 
 
+@dashboard_bp.route("/followups/restore-defaults", methods=["POST"])
+@login_required_dashboard
+def followup_restore_defaults():
+    """
+    يرجّع مراحل السلّم الافتراضية الناقصة (1-4) — للي مسح مرحلة بالغلط.
+    بيضيف الناقص بس بأرقامه: اللي التاجر عدّله أو ضافه بنفسه مايتلمسش.
+    """
+    tenant = _current_tenant()
+    import default_keywords
+    added = default_keywords.seed_followup_stages_for_tenant(
+        db, FollowupStage, tenant.id)
+    if added:
+        db.session.commit()
+        _invalidate(tenant)
+        flash(f"تمت استعادة {added} مرحلة افتراضية ✅", "success")
+    else:
+        flash("كل المراحل الافتراضية (1-4) موجودة بالفعل 👌", "success")
+    return redirect(url_for("dashboard.followups_list"))
+
+
 # =====================================================================
 # SALARY CAMPAIGN — حملة يوم المرتبات
 # =====================================================================
