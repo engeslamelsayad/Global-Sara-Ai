@@ -69,6 +69,11 @@ def run(flask_app=None):
                 f"ALTER TABLE tenants ADD COLUMN {col} {typ}",
                 f"tenants.{col}")
 
+        print("\n=== 1ب-2. جدول tenants (عملة البزنس) ===")
+        ok_all &= safe_alter(conn,
+            "ALTER TABLE tenants ADD COLUMN currency VARCHAR(20) DEFAULT 'جنيه'",
+            "tenants.currency")
+
         print("\n=== 1ج. جدول bot_configs (العروض الديناميكية) ===")
         for col, typ in [
             ("offer_hesitation_enabled",   "BOOLEAN DEFAULT FALSE"),
@@ -162,28 +167,41 @@ def run(flask_app=None):
             print(f"  ⚠️ keywords backfill: {e}")
             ok_all = False
 
-        print("\n=== 6. سلّم المتابعات الافتراضي (للحسابات الفاضية بس) ===")
-        # بنزرع سلّم الـ 4 مراحل للحسابات اللي **مفيهاش أي مرحلة** بس
-        # (حسابات جديدة اتعملت قبل ما create_tenant يبدأ يزرعها بنفسه).
-        # اللي عنده مراحل — حتى لو أقل من 4 — مابنلمسوش: يمكن مسح عن قصد،
-        # وزر "استعادة المراحل الافتراضية" في الداشبورد موجود للي مسح بالغلط.
+        print("\n=== 6. ترقية سلّم المتابعات لـ 4 مراحل ===")
+        # الـ tenants القدام عندهم مرحلتين (24h + 12h خصم). نرقّيهم لسلّم الـ 4
+        # مراحل الديناميكي (6/24/24+خصم/48+خصم) — بس لو لسه ماترقّوش.
         try:
             from models import Tenant, FollowupStage
-            import default_keywords
-            seeded_fu = 0
+            _target = [(1, 6, 0), (2, 24, 0), (3, 24, 10), (4, 48, 10)]
+            upgraded = 0
             for tenant in Tenant.query.all():
-                if FollowupStage.query.filter_by(tenant_id=tenant.id).first():
-                    continue   # عنده مراحل — مانلمسوش
-                seeded_fu += default_keywords.seed_followup_stages_for_tenant(
-                    db, FollowupStage, tenant.id)
-            if seeded_fu:
+                existing = FollowupStage.query.filter_by(tenant_id=tenant.id).all()
+                # نرقّي بس لو عنده أقل من 4 مراحل (السلّم القديم أو ناقص)
+                if len(existing) >= 4:
+                    continue
+                have_nums = {s.stage_number for s in existing}
+                for num, hrs, disc in _target:
+                    if num in have_nums:
+                        continue
+                    db.session.add(FollowupStage(
+                        tenant_id=tenant.id, stage_number=num,
+                        hours_after_last=hrs, message_text="", discount_percent=disc,
+                    ))
+                    upgraded += 1
+                # نصلّح توقيت المرحلتين القديمتين لو مختلف (24→6 للأولى)
+                for s in existing:
+                    for num, hrs, disc in _target:
+                        if s.stage_number == num and s.hours_after_last != hrs:
+                            s.hours_after_last = hrs
+                            s.discount_percent = disc
+            if upgraded:
                 db.session.commit()
-                print(f"  ✅ اتضاف {seeded_fu} مرحلة متابعة للحسابات الفاضية")
+                print(f"  ✅ اتضاف {upgraded} مرحلة متابعة (ترقية للسلّم الديناميكي)")
             else:
-                print("  ⏭  مفيش حسابات فاضية من المراحل")
+                print("  ⏭  كل الـ tenants عندهم السلّم الكامل بالفعل")
         except Exception as e:
             db.session.rollback()
-            print(f"  ⚠️ followup stages seed: {e}")
+            print(f"  ⚠️ followup stages upgrade: {e}")
             ok_all = False
 
         print("\n=== 7. الافتتاحيات الممنوعة الافتراضية ===")

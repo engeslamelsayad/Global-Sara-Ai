@@ -709,7 +709,8 @@ def get_ai_response(bundle, sender_id, user_message, state,
             if not _price_prod and state.get("products_asked"):
                 _lpk = state["products_asked"][-1]
                 _price_prod = next((p for p in products if p.product_key == _lpk), None)
-            _order_price = compute_order_price(_price_prod, state, _disc)
+            _cur = getattr(bundle["tenant"], "currency", None) or "جنيه"
+            _order_price = compute_order_price(_price_prod, state, _disc, currency=_cur)
             new_order = {
                 "name": groups[0].strip(), "phone": groups[1].strip(),
                 "address": groups[2].strip(), "product": groups[3].strip(),
@@ -834,16 +835,17 @@ def push_to_google_sheet_async(tenant, order_data, page_id):
     ).start()
 
 
-def compute_order_price(product, state, discount_code=""):
+def compute_order_price(product, state, discount_code="", currency="جنيه"):
     """
     يحسب السعر النهائي للطلب: السعر الأساسي × الكمية − الخصم.
     product: كائن Product (أو None). state: حالة المحادثة.
-    بيرجّع string واضح زي "449 ج" أو "404 ج (بعد خصم 10%)".
+    currency: عملة البزنس (من tenant.currency).
+    بيرجّع string واضح زي "449 جنيه" أو "404 جنيه (بعد خصم 10%)".
     """
     import re as _re
     if not product:
         return ""
-    price_str = product.price_note or (f"{product.price_amount} ج" if product.price_amount else "")
+    price_str = product.price_note or (f"{product.price_amount} {currency}" if product.price_amount else "")
     _base = _re.search(r"\d{3,}", price_str or "")
     if not _base:
         return ""
@@ -892,8 +894,8 @@ def compute_order_price(product, state, discount_code=""):
 
     if disc_pct:
         after = round(final * (1 - disc_pct / 100))
-        return f"{after} ج (بعد خصم {disc_pct}% — الأصلي {final} ج، {note})"
-    return f"{final} ج ({note})"
+        return f"{after} {currency} (بعد خصم {disc_pct}% — الأصلي {final} {currency}، {note})"
+    return f"{final} {currency} ({note})"
 
 
 def save_order(tenant, order_data, page_id):

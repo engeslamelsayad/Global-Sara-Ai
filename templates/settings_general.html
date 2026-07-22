@@ -13,6 +13,13 @@
   <label>المجال <span class="hint">مثال: منتجات طبية طبيعية، أزياء، إلكترونيات</span></label>
   <input type="text" name="industry" value="{{ tenant.industry or '' }}">
 
+  <label>عملة البزنس <span class="hint">بتظهر في أسعار المنتجات وحساب الطلبات</span></label>
+  <select name="currency">
+    {% for c in currencies %}
+      <option value="{{ c }}" {{ 'selected' if (tenant.currency or 'جنيه') == c }}>{{ c }}</option>
+    {% endfor %}
+  </select>
+
   <label>وصف البزنس * <span class="hint">اكتب بالتفصيل: بتبيعوا إيه، لمين، وإيه اللي يميزكم</span></label>
   <textarea name="business_description" id="f-desc" style="min-height:120px">{{ tenant.business_description or '' }}</textarea>
   <button type="button" class="btn-ai" style="margin-top:8px" onclick="reviewDescription()">✨ راجعلي الوصف</button>

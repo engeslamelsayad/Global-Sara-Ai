@@ -29,6 +29,10 @@ def gen_uuid():
 # =====================================================================
 # TENANT — الشركة نفسها
 # =====================================================================
+# العملات المدعومة — بتظهر في dropdown بيانات البزنس
+SUPPORTED_CURRENCIES = ["جنيه", "دينار", "درهم", "ريال", "ليرة", "دولار", "شيكل"]
+
+
 class Tenant(db.Model):
     __tablename__ = "tenants"
 
@@ -39,6 +43,9 @@ class Tenant(db.Model):
     # وصف حر للبزنس — المالك بيكتبه، وبيُستخدم كأساس لاقتراحات الـ AI
     business_description = db.Column(db.Text)
     industry              = db.Column(db.String(120))
+
+    # عملة البزنس — بتظهر في فورم المنتجات وحساب سعر الأوردر
+    currency              = db.Column(db.String(20), default="جنيه")
 
     # تكامل Google Sheet — رابط Apps Script Web App لاستقبال الطلبات
     google_sheet_url      = db.Column(db.String(500))

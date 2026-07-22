@@ -550,12 +550,21 @@ def settings_general():
         tenant.business_description = request.form.get("business_description", "").strip()
         tenant.industry              = request.form.get("industry", "").strip()
         tenant.google_sheet_url      = request.form.get("google_sheet_url", "").strip()
+
+        # عملة البزنس — بنقبل من القائمة المعتمدة بس
+        from models import SUPPORTED_CURRENCIES
+        cur = request.form.get("currency", "").strip()
+        if cur in SUPPORTED_CURRENCIES:
+            tenant.currency = cur
+
         db.session.commit()
         _invalidate(tenant)
         flash("تم تحديث البيانات العامة ✅", "success")
         return redirect(url_for("dashboard.settings_general"))
 
-    return render_template("settings_general.html", tenant=tenant)
+    from models import SUPPORTED_CURRENCIES
+    return render_template("settings_general.html", tenant=tenant,
+                           currencies=SUPPORTED_CURRENCIES)
 
 
 @dashboard_bp.route("/settings/general/ai-review", methods=["POST"])
@@ -772,26 +781,6 @@ def followup_toggle(stage_id):
     stage.is_active = not stage.is_active
     db.session.commit()
     _invalidate(tenant)
-    return redirect(url_for("dashboard.followups_list"))
-
-
-@dashboard_bp.route("/followups/restore-defaults", methods=["POST"])
-@login_required_dashboard
-def followup_restore_defaults():
-    """
-    يرجّع مراحل السلّم الافتراضية الناقصة (1-4) — للي مسح مرحلة بالغلط.
-    بيضيف الناقص بس بأرقامه: اللي التاجر عدّله أو ضافه بنفسه مايتلمسش.
-    """
-    tenant = _current_tenant()
-    import default_keywords
-    added = default_keywords.seed_followup_stages_for_tenant(
-        db, FollowupStage, tenant.id)
-    if added:
-        db.session.commit()
-        _invalidate(tenant)
-        flash(f"تمت استعادة {added} مرحلة افتراضية ✅", "success")
-    else:
-        flash("كل المراحل الافتراضية (1-4) موجودة بالفعل 👌", "success")
     return redirect(url_for("dashboard.followups_list"))
 
 
