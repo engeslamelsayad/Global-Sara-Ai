@@ -1091,41 +1091,64 @@ def _ensure_label_id(label, page_id, access_token):
     """
     يتأكد إن الـ label موجودة على Meta لهذه الصفحة، وبيرجّع الـ meta label id.
     بيكاش الـ id في عمود meta_label_ids (JSON per page) لتفادي إعادة الإنشاء.
+
+    🛡️ صلابة ضد code=2 (Service temporarily unavailable):
+    الخطأ ده transient حسب Meta نفسها (is_transient=true) — فبنعيد محاولة
+    الـ GET مرة، ولو فضل فاشل مانستسلمش: بننزل على محاولة الإنشاء المباشر
+    (POST) — لو الليبل موجودة أصلاً Meta بترجّع الـ id بتاعها أو خطأ واضح.
+    قبل كده كان أي فشل في الـ GET بيوقف السلسلة كلها والليبل عمرها ماتتحط.
     """
     from models import db as _db
     ids = json.loads(label.meta_label_ids or "{}")
     if page_id in ids:
         return ids[page_id]
 
-    # 1) دوّر على label بنفس الاسم على Meta (اتعملت قبل كده)
-    try:
-        r = requests.get(
-            "https://graph.facebook.com/v18.0/me/custom_labels",
-            params={"fields": "id,page_label_name", "access_token": access_token},
-            timeout=10,
-        )
-        resp = r.json()
-        if "error" in resp:
-            err = resp["error"]
-            print(f"❌ Labels GET error (page {page_id}): code={err.get('code')} — {err.get('message')}")
-            if err.get("code") in (10, 200, 190):
-                print("   ⚠️ الـ token غالباً ناقص صلاحية pages_manage_metadata")
-            return None
-        for item in resp.get("data", []):
-            item_name = item.get("page_label_name") or item.get("name")
-            if item_name == label.name:
-                ids[page_id] = str(item["id"])
-                label.meta_label_ids = json.dumps(ids, ensure_ascii=False)
-                _db.session.commit()
-                return str(item["id"])
-    except Exception as e:
-        print(f"⚠️ Labels lookup error: {e}")
-        return None
+    # 1) دوّر على label بنفس الاسم على Meta (اتعملت قبل كده) — بمحاولتين
+    get_failed_transient = False
+    for attempt in (1, 2):
+        try:
+            r = requests.get(
+                "https://graph.facebook.com/v21.0/me/custom_labels",
+                params={"fields": "id,page_label_name", "access_token": access_token},
+                timeout=10,
+            )
+            resp = r.json()
+            if "error" in resp:
+                err = resp["error"]
+                code = err.get("code")
+                print(f"❌ Labels GET error (page {page_id}, محاولة {attempt}): "
+                      f"code={code} — {err.get('message')}")
+                if code in (10, 200, 190):
+                    print("   ⚠️ الـ token غالباً ناقص صلاحية pages_manage_metadata")
+                    return None   # مشكلة صلاحيات — الإعادة مالهاش لازمة
+                if code == 2 and attempt == 1:
+                    time.sleep(2)   # transient حسب Meta — جرّب تاني
+                    continue
+                get_failed_transient = (code == 2)
+                break
+            # الـ GET نجح — دوّر على الاسم
+            for item in resp.get("data", []):
+                item_name = item.get("page_label_name") or item.get("name")
+                if item_name == label.name:
+                    ids[page_id] = str(item["id"])
+                    label.meta_label_ids = json.dumps(ids, ensure_ascii=False)
+                    _db.session.commit()
+                    return str(item["id"])
+            break   # نجح بس الاسم مش موجود → ننشئها تحت
+        except Exception as e:
+            print(f"⚠️ Labels lookup error (محاولة {attempt}): {e}")
+            if attempt == 1:
+                time.sleep(2)
+                continue
+            get_failed_transient = True
 
-    # 2) اعمل الـ label من جديد
+    if get_failed_transient:
+        print(f"   ↪️ الـ GET فشل مؤقتاً — بنحاول الإنشاء المباشر لـ «{label.name}»")
+
+    # 2) اعمل الـ label من جديد (أو جرّب — لو موجودة Meta بترد بخطأ واضح)
     try:
         cr = requests.post(
-            "https://graph.facebook.com/v18.0/me/custom_labels",
+            "https://graph.facebook.com/v21.0/me/custom_labels",
             params={"access_token": access_token},
             json={"page_label_name": label.name},
             timeout=10,
@@ -1138,7 +1161,13 @@ def _ensure_label_id(label, page_id, access_token):
             print(f"   ➕ label جديدة على Meta: {label.name} ({cj['id']})")
             return str(cj["id"])
         elif "error" in cj:
-            print(f"❌ فشل إنشاء label '{label.name}': {cj['error'].get('message')}")
+            cerr = cj["error"]
+            print(f"❌ فشل إنشاء label '{label.name}': "
+                  f"code={cerr.get('code')} — {cerr.get('message')}")
+            if cerr.get("code") == 2:
+                print("   ⚠️ code=2 ثابت على الصفحة دي — راجع: (1) الـ token فيه "
+                      "pages_manage_metadata؟ (2) الـ Meta App عنده Advanced Access "
+                      "للصلاحية دي؟ جرّب نفس الطلب من Graph API Explorer للتأكيد")
     except Exception as e:
         print(f"⚠️ Label create error: {e}")
     return None
@@ -1149,7 +1178,7 @@ def _refetch_label_id(label, page_id, access_token):
     from models import db as _db
     try:
         r = requests.get(
-            "https://graph.facebook.com/v18.0/me/custom_labels",
+            "https://graph.facebook.com/v21.0/me/custom_labels",
             params={"fields": "id,page_label_name", "access_token": access_token},
             timeout=10,
         )
@@ -1170,7 +1199,7 @@ def _refetch_label_id(label, page_id, access_token):
 def _do_label_post(label_id, sender_id, access_token):
     """ينفّذ POST تطبيق label — بيرجّع (status, resp)"""
     r = requests.post(
-        f"https://graph.facebook.com/v18.0/{str(label_id)}/label",
+        f"https://graph.facebook.com/v21.0/{str(label_id)}/label",
         params={"access_token": access_token},
         headers={"Content-Type": "application/json"},
         json={"user": str(sender_id)},
