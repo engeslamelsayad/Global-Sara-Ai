@@ -79,8 +79,11 @@ def run():
             return_policy="الاستبدال والاسترجاع متاح ومضمون",
             exchange_policy="استبدال خلال 14 يوم من الاستلام",
             inspection_policy="العميل يعاين المنتج بصرياً قبل الدفع",
-            enable_sensitive_area_warning=True,
-            enable_chronic_disease_warning=True,
+            # التحذيرات الطبية (مناطق حساسة / أمراض مزمنة) معطّلة افتراضياً —
+            # دي خاصة بمنتجات العناية والعلاج. تاجر المنتجات الطبية يفعّلها
+            # بنفسه من صفحة "السياسات".
+            enable_sensitive_area_warning=False,
+            enable_chronic_disease_warning=False,
             enable_followup=True,
         )
         db.session.add(policy)
