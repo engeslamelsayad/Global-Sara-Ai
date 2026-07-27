@@ -1512,6 +1512,58 @@ def buffer_message(bundle, sender_id, message, page_id, platform,
 # =====================================================================
 # ECHO DETECTION — كشف رد الموديريتور البشري ووقف البوت فوراً
 # =====================================================================
+# ── التوثيق التلقائي بالسلوك ──────────────────────────────────────────
+# الأداة الآلية (رد على تعليقات / حملة رسائل) بتراسل ناس *ماعندهمش أي
+# محادثة سابقة* مع البوت. الموديريتور البشري بيتدخل *جوّه محادثة شغالة*.
+# فالصدى من تطبيق مجهول لعميل غريب = outreach → مانوقفش البوت،
+# ولو نفس التطبيق راسل 3 غرباء مختلفين → يتوثّق تلقائياً (مفيش إنسان
+# بيبادر بمراسلة 3 ناس ماكتبوش للصفحة أصلاً).
+AUTO_TRUST_THRESHOLD = 3
+
+# تطبيق إنبوكس صفحات Meta الرسمي — الصدى منه دايماً رد بشري حقيقي،
+# حتى لو كان لعميل غريب (موديريتور بيراسل صاحب تعليق يدوياً) → إيقاف دايماً
+META_INBOX_APP_ID = "263902037430900"
+
+_outreach_tracker = {}        # {(tenant_id, app_id): set(user_ids)}
+_outreach_lock = threading.Lock()
+
+
+def _note_outreach(tenant_id, app_id, user_psid):
+    """
+    يسجّل إن التطبيق ده راسل عميل غريب. لو وصل للحد → توثيق تلقائي.
+    بيرجّع True لو التطبيق اتوثّق في النداء ده.
+    """
+    with _outreach_lock:
+        key = (tenant_id, app_id)
+        users = _outreach_tracker.setdefault(key, set())
+        users.add(user_psid)
+        count = len(users)
+        # حماية الذاكرة
+        if len(_outreach_tracker) > 1000:
+            _outreach_tracker.clear()
+            _outreach_tracker[key] = users
+    if count < AUTO_TRUST_THRESHOLD:
+        print(f"🤖 Outreach echo (app={app_id}) → غريب رقم {count}/{AUTO_TRUST_THRESHOLD} "
+              f"— مفيش إيقاف")
+        return False
+
+    # وصل للحد → توثيق تلقائي
+    from models import BotAppId
+    try:
+        if not BotAppId.query.filter_by(tenant_id=tenant_id, app_id=app_id).first():
+            db.session.add(BotAppId(
+                tenant_id=tenant_id, app_id=app_id,
+                label="اتوثّق تلقائياً — رسائل افتتاحية جماعية"))
+            db.session.commit()
+            invalidate_tenant_cache()
+            print(f"✅ Auto-trusted app {app_id} for tenant {tenant_id} "
+                  f"(راسل {count} غرباء — ده تطبيق آلي مش إنسان)")
+    except Exception as e:
+        db.session.rollback()
+        print(f"⚠️ Auto-trust failed for app {app_id}: {e}")
+    return True
+
+
 def handle_echo(bundle, event):
     """
     يُستدعى لما الـ webhook event يكون is_echo=True
@@ -1550,6 +1602,15 @@ def handle_echo(bundle, event):
         sent_ts = _recent_bot_sends.get((tenant_id, user_psid), 0)
         if time.time() - sent_ts < 15:
             return
+
+    # ── 🤖 التصنيف السلوكي: outreach آلي ولا تدخّل بشري؟ ──
+    # عميل *مالوش أي محادثة سابقة* + التطبيق مش إنبوكس Meta الرسمي
+    # → دي رسالة افتتاحية من أداة آلية (رد تعليقات / حملة) → مانوقفش البوت.
+    # الموديريتور البشري بيتدخل جوّه محادثة شغالة → بيقع في بلوك الإيقاف تحت.
+    has_conversation = bool(state and state.get("history"))
+    if not has_conversation and echo_app_id != META_INBOX_APP_ID:
+        _note_outreach(tenant_id, echo_app_id, user_psid)
+        return
 
     # ── 🙋 موديريتور بشري فعلاً → إيقاف البوت لهذا العميل ──
     if not state:
