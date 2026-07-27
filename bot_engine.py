@@ -1559,6 +1559,7 @@ def handle_echo(bundle, event):
         state = default_state(tenant_id, page_id, "facebook")
     state["is_human_handoff"] = True
     state["handoff_reason"] = f"رد موديريتور من الإنبوكس (app={echo_app_id})"
+    state["handoff_app_id"] = echo_app_id
     state["handoff_time"] = time.time()
     save_state(tenant_id, user_psid, state)
     print(f"🙋 Moderator echo (app={echo_app_id}) → bot paused for {user_psid}")

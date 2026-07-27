@@ -9,6 +9,69 @@
   </p>
 </div>
 
+{% if apps %}
+<div class="card" style="border:2px solid var(--primary)">
+  <h3 style="margin-top:0">🤖 تطبيقات آلية وقّفت البوت</h3>
+  <p style="font-size:13px; color:var(--text-soft); margin-top:0">
+    لو بتستخدم أداة رد على التعليقات أو حملات رسائل، صداها بيتفسّر كرد موديريتور
+    وبيوقف البوت. وثّق التطبيق وهيرجع البوت فوراً لكل محادثاته — وصداه مش هيوقف حد تاني.
+  </p>
+  {% for app_id, cnt in apps %}
+  <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; border:1px solid var(--border); border-radius:10px; padding:12px 14px; margin-bottom:8px">
+    <div>
+      <span style="font-family:monospace; direction:ltr; font-size:13px">app = {{ app_id }}</span>
+      <b style="color:var(--danger); margin-right:10px">وقّف {{ cnt }} محادثة</b>
+      {% if app_id == META_INBOX_APP %}
+        <span style="background:var(--warn-bg); color:var(--warn); border-radius:6px; padding:2px 8px; font-size:12px; font-weight:700">
+          إنبوكس Meta الرسمي — ده رد بشري حقيقي، ماتوثقوش
+        </span>
+      {% endif %}
+    </div>
+    {% if app_id != META_INBOX_APP %}
+    <form method="POST" action="{{ url_for('dashboard.handoff_trust_app') }}"
+          style="display:flex; gap:8px; align-items:center; flex-shrink:0">
+      <input type="hidden" name="app_id" value="{{ app_id }}">
+      <input type="text" name="label" placeholder="اسم الأداة (مثلاً: أداة التعليقات)"
+             style="width:190px; margin:0">
+      <button class="btn btn-primary btn-sm" type="submit">✅ وثّق ورجّع البوت</button>
+    </form>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="card">
+  <h3 style="margin-top:0; font-size:15px">🛡️ التطبيقات الموثوقة حالياً</h3>
+  <p style="font-size:12px; color:var(--text-soft); margin-top:0">
+    الصدى من التطبيقات دي بيتتجاهل (بوتك + أدواتك الآلية). قبل ما تطلق حملة رسائل من
+    Meta، ضيف الـ App ID بتاعها هنا مسبقاً وهتشتغل من أول عميل.
+  </p>
+  {% if trusted %}
+    {% for t in trusted %}
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 4px; border-bottom:1px solid var(--border); font-size:13px">
+      <div>
+        <span style="font-family:monospace; direction:ltr">{{ t.app_id }}</span>
+        <span style="color:var(--text-soft); margin-right:8px">{{ t.label or '' }}</span>
+      </div>
+      <form method="POST" action="{{ url_for('dashboard.handoff_untrust_app') }}"
+            onsubmit="return confirm('صدى التطبيق ده هيرجع يوقف البوت — متأكد؟')">
+        <input type="hidden" name="row_id" value="{{ t.id }}">
+        <button class="btn btn-secondary btn-sm" type="submit">🗑 إزالة</button>
+      </form>
+    </div>
+    {% endfor %}
+  {% else %}
+    <p style="font-size:13px; color:var(--text-soft)">لسه مفيش تطبيقات موثوقة</p>
+  {% endif %}
+  <form method="POST" action="{{ url_for('dashboard.handoff_trust_app') }}"
+        style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap">
+    <input type="text" name="app_id" placeholder="App ID (أرقام)" dir="ltr" style="width:180px; margin:0">
+    <input type="text" name="label" placeholder="اسم الأداة" style="width:180px; margin:0">
+    <button class="btn btn-secondary btn-sm" type="submit">➕ إضافة يدوياً</button>
+  </form>
+</div>
+
 {% if rows %}
 <div class="card">
   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px">

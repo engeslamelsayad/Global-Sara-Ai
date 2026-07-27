@@ -1106,9 +1106,11 @@ def telegram_test():
 def handoffs_list():
     tenant = _current_tenant()
     from bot_engine import list_tenant_states_with_ids
+    from models import BotAppId
     import time as _t
 
     rows = []
+    app_groups = {}   # {app_id: عدد المحادثات الموقوفة بسببه}
     for sender_id, st in list_tenant_states_with_ids(tenant.id):
         if not st.get("is_human_handoff"):
             continue
@@ -1125,6 +1127,9 @@ def handoffs_list():
             ago = f"من {int(ago_h)} ساعة"
         else:
             ago = f"من {int(ago_h / 24)} يوم"
+        app_id = st.get("handoff_app_id")
+        if app_id:
+            app_groups[app_id] = app_groups.get(app_id, 0) + 1
         rows.append({
             "sender_id": sender_id,
             "reason": st.get("handoff_reason") or "غير مسجّل (قبل التحديث)",
@@ -1133,7 +1138,84 @@ def handoffs_list():
             "sort_ts": ts,
         })
     rows.sort(key=lambda r: r["sort_ts"], reverse=True)
-    return render_template("handoffs.html", tenant=tenant, rows=rows)
+
+    trusted = BotAppId.query.filter_by(tenant_id=tenant.id).all()
+    apps = sorted(app_groups.items(), key=lambda x: x[1], reverse=True)
+    return render_template("handoffs.html", tenant=tenant, rows=rows,
+                           apps=apps, trusted=trusted,
+                           META_INBOX_APP=META_INBOX_APP_ID)
+
+
+# تطبيق إنبوكس صفحات Meta الرسمي — الصدى منه = رد بشري حقيقي،
+# فممنوع توثيقه (توثيقه معناه إن البوت هيتداخل في كلام الموديريتورين)
+META_INBOX_APP_ID = "263902037430900"
+
+
+@dashboard_bp.route("/handoffs/trust-app", methods=["POST"])
+@login_required_dashboard
+def handoff_trust_app():
+    """
+    يوثّق تطبيق آلي (أداة تعليقات/حملات) عشان صداه مايوقفش البوت،
+    ويرجّع البوت فوراً لكل المحادثات اللي التطبيق ده وقّفها.
+    """
+    tenant = _current_tenant()
+    from models import BotAppId
+    from bot_engine import (list_tenant_states_with_ids, save_state,
+                            invalidate_tenant_cache)
+
+    app_id = (request.form.get("app_id") or "").strip()
+    label = (request.form.get("label") or "").strip() or "تطبيق آلي موثوق"
+
+    if not app_id.isdigit():
+        flash("الـ App ID لازم يكون أرقام بس", "error")
+        return redirect(url_for("dashboard.handoffs_list"))
+    if app_id == META_INBOX_APP_ID:
+        flash("ده تطبيق إنبوكس Meta الرسمي — الصدى منه معناه رد بشري حقيقي، "
+              "وتوثيقه هيخلي البوت يتداخل في كلام الموديريتورين. مينفعش يتوثّق.", "error")
+        return redirect(url_for("dashboard.handoffs_list"))
+
+    # 1) سجّل التطبيق (idempotent)
+    if not BotAppId.query.filter_by(tenant_id=tenant.id, app_id=app_id).first():
+        db.session.add(BotAppId(tenant_id=tenant.id, app_id=app_id, label=label))
+        db.session.commit()
+        invalidate_tenant_cache()
+
+    # 2) رجّع البوت لكل محادثة التطبيق ده وقّفها
+    released = 0
+    for sender_id, st in list_tenant_states_with_ids(tenant.id):
+        if not st.get("is_human_handoff"):
+            continue
+        if st.get("handoff_app_id") != app_id:
+            continue
+        st["is_human_handoff"] = False
+        st.pop("handoff_reason", None)
+        st.pop("handoff_app_id", None)
+        st.pop("handoff_time", None)
+        if st.get("stage") == "HUMAN_NEEDED":
+            st["stage"] = "INQUIRY"
+        save_state(tenant.id, sender_id, st)
+        released += 1
+
+    flash(f"تم توثيق التطبيق ({label}) ✅ ورجع البوت لـ {released} محادثة — "
+          f"هيرد على رسايلهم الجاية", "success")
+    return redirect(url_for("dashboard.handoffs_list"))
+
+
+@dashboard_bp.route("/handoffs/untrust-app", methods=["POST"])
+@login_required_dashboard
+def handoff_untrust_app():
+    """يشيل تطبيق من قائمة الموثوقين — صداه هيرجع يوقف البوت تاني"""
+    tenant = _current_tenant()
+    from models import BotAppId
+    from bot_engine import invalidate_tenant_cache
+    row_id = (request.form.get("row_id") or "").strip()
+    row = BotAppId.query.filter_by(id=row_id, tenant_id=tenant.id).first()
+    if row:
+        db.session.delete(row)
+        db.session.commit()
+        invalidate_tenant_cache()
+        flash("اتشال التطبيق من الموثوقين", "success")
+    return redirect(url_for("dashboard.handoffs_list"))
 
 
 @dashboard_bp.route("/handoffs/release", methods=["POST"])
