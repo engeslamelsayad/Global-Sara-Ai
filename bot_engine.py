@@ -263,6 +263,17 @@ def capture_ad_referral(bundle, event, sender_id):
     tenant = bundle["tenant"]
     matched = find_relevant_product(ad_title, bundle["products"])
     state = load_state(tenant.id, sender_id)
+    if not state or "stage" not in state:
+        # 🛡️ عميل جديد جاي من الإعلان — لازم نبني state *كامل* مش جزئي.
+        # قبل كده كنا بنحفظ dict فيه حقلي الإعلان بس، فمعالجة الرسالة
+        # بعدها كانت بتلاقيه "موجود" وتبني عليه → KeyError: 'stage'
+        # وانهيار الرد على كل عملاء الإعلانات.
+        page_id = str(event.get("recipient", {}).get("id", ""))
+        page = bundle["pages"].get(page_id)
+        platform = getattr(page, "platform", None) or "facebook"
+        full = default_state(tenant.id, page_id, platform)
+        full.update(state or {})
+        state = full
     state["source_ad_title"] = ad_title
     if matched:
         state["source_ad_product_key"] = matched.product_key
@@ -1327,8 +1338,12 @@ def do_process_message(tenant_id, sender_id, user_message, page_id, platform,
     keywords = bundle["keywords"]
 
     state = load_state(tenant_id, sender_id)
-    if not state:
-        state = default_state(tenant_id, page_id, platform)
+    if not state or "stage" not in state:
+        # state مفقود أو ناقص (اتعمل جزئياً من capture_ad_referral قبل الإصلاح)
+        # — نبني الهيكل الكامل ونحافظ على أي بيانات ملتقطة (زي إعلان المصدر)
+        fresh = default_state(tenant_id, page_id, platform)
+        fresh.update(state or {})
+        state = fresh
 
     state["last_message"]    = time.time()
     state["messages_count"]  = state.get("messages_count", 0) + 1
