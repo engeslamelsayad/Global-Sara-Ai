@@ -1111,7 +1111,7 @@ def coach_settings():
     tenant.coach_interval_days = min(max(days, 1), 14)
     db.session.commit()
     flash("تم حفظ إعدادات مدرّب المبيعات ✅", "success")
-    return redirect(url_for("dashboard.telegram_page"))
+    return redirect(url_for("dashboard.telegram_settings"))
 
 
 @dashboard_bp.route("/telegram/coach-test", methods=["POST"])
