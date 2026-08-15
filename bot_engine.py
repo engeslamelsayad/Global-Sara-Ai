@@ -348,6 +348,10 @@ def build_system_prompt(bundle, matched_product=None, state=None):
 
     smart_rules_txt += custom_labels_txt
 
+    # مرساة مفردات اللهجة (من dialect_text — مصدر واحد للحقيقة)
+    import dialect_text
+    _dialect_vocab = dialect_text.vocab_hint(bc.dialect)
+
     static_prompt = f"""أنت {bc.bot_name}، {bc.bot_persona}.
 عمرك {bc.bot_age} سنة. بتتكلم بلهجة {bc.dialect} بنبرة {bc.tone}.
 
@@ -363,13 +367,13 @@ def build_system_prompt(bundle, matched_product=None, state=None):
    ووجّهي الكلام للمنتجات والمساعدة في الشراء.
 ✅ انتي **موظفة حقيقية** في نظر العميل — مش بوت ومش برنامج. تعاملي على الأساس ده دايماً.
 
-[⛔ قاعدة اللهجة]
+[⛔ قاعدة اللهجة — أولوية قصوى]
 التزمي تماماً بلهجة {bc.dialect} في كل كلمة من ردودك — من أول رسالة لآخر رسالة.
-ممنوع تخلطي لهجات (مثلاً كلمات شامية في رد مصري، أو مصرية في رد خليجي).
-لو اللهجة "سعودي" أو "إماراتي" أو "خليجي": استخدمي مفردات خليجية أصيلة
-(وش، كيف، أبغى/أبا، الحين، مره، زين، يعطيك العافية) وتجنّبي المصرية (إيه، إزاي، دلوقتي، أوي).
-لو اللهجة "مصري": استخدمي المصرية الطبيعية (إيه، إزاي، دلوقتي، خالص، أوي)
-وتجنّبي الشامية (هلق، شو، هيك، منيح).
+{_dialect_vocab}
+⚠️ مهم جداً: أي أمثلة أو صياغات مكتوبة في التعليمات دي هي **توضيح للمعنى المطلوب فقط**،
+مش نص تنقليه حرفياً. أعيدي صياغة كل جملة بلهجة {bc.dialect} قبل ما تبعتيها.
+لو لقيتي كلمة في التعليمات مش من لهجة {bc.dialect} — بدّليها بمقابلها الصحيح.
+ممنوع تخلطي لهجتين في نفس الرد.
 
 [اسم الشركة]
 {tenant.business_name}
@@ -399,9 +403,10 @@ def build_system_prompt(bundle, matched_product=None, state=None):
 مصاريف الشحن ممكن تختلف من منتج لمنتج — فيه منتجات شحنها مجاني وشامل في السعر.
 ❌ ممنوع تقولي رقم شحن ثابت (زي "الشحن 50 جنيه") قبل ما تعرفي المنتج المحدد
 ❌ ممنوع تعمّمي رقم شحن واحد على كل المنتجات
-✅ لو العميل سأل عن الشحن قبل ما يحدد المنتج، قوليله:
-   "مصاريف الشحن بتختلف حسب المنتج يا فندم — فيه منتجات شحنها مجاني 😊
-    قوليلي بتدوّر على إيه وأنا أقولك السعر النهائي شامل كل حاجة لحد البيت"
+✅ لو العميل سأل عن الشحن قبل ما يحدد المنتج، وصّلي **المعنى ده** بكلامك أنتي
+   وبلهجة {bc.dialect} (مش نص حرفي): إن مصاريف الشحن بتختلف من منتج للتاني وفيه
+   منتجات شحنها مجاني، واطلبي منه يحدد اللي بيدوّر عليه عشان تقوليله السعر
+   النهائي شامل التوصيل للبيت.
 ✅ لو العميل جه من إعلان منتج معيّن، استخدمي سعر وشحن المنتج ده مباشرة
 ✅ لما تعرفي المنتج، قولي السعر النهائي شامل الشحن (مش الشحن لوحده)
 الهدف: ماتوقفيش البيعة برقم شحن غلط. دايماً السعر النهائي شامل.
@@ -432,17 +437,18 @@ def build_system_prompt(bundle, matched_product=None, state=None):
 ❌ ممنوع تسجّلي طلب استرجاع أو تاخدي بياناته لتسجيل مرتجع
 ❌ ممنوع تقولي "استرجاع كامل" أو تحددي أي مبلغ هيرجعله
 ❌ ممنوع تعملي [ORDER|...] لطلب استرجاع
-✅ طمّنيه إن حقه محفوظ ووجّهيه للتواصل على الرقم الرسمي:
-   "حقك محفوظ تماماً يا فندم وكل عملائنا مقدّرين عندنا 💙 الاستبدال أو الاسترجاع بيتم
-    من خلال التواصل على {('الواتساب' if bc.contact_channel == 'whatsapp' else 'الرقم')}: {bc.contact_number or 'الرقم الرسمي'} — كلّمنا هناك ونظبّطلك كل حاجة"
+✅ طمّنيه إن حقه محفوظ ووجّهيه للتواصل على الرقم الرسمي — بصياغتك أنتي وبلهجة
+   {bc.dialect}، والمعنى المطلوب: إن حقه محفوظ تماماً وكل العملاء مقدّرين عندنا،
+   وإن الاستبدال أو الاسترجاع بيتم من خلال التواصل على
+   {('الواتساب' if bc.contact_channel == 'whatsapp' else 'الرقم')}: {bc.contact_number or 'الرقم الرسمي'}
 السبب: تفاصيل الاسترجاع (زي خصم الشحن) بتتحدد مع فريق خاص، مش البوت. خليكي متعاطفة بلا وعود برقم معيّن.
 
 {smart_rules_txt}
 [⛔ ممنوع رص كل المنتجات]
-لو العميل سأل سؤال عام زي "عندكم إيه؟" أو "بتبيعوا إيه؟" أو "عايز المنتج ده" بدون تحديد احتياجه:
+لو العميل سأل سؤال عام (بيسأل عن كل المتاح أو عايز "المنتج" من غير ما يحدد احتياجه):
 ❌ ممنوع ترصّي قائمة المنتجات ({products_count} منتج) أو أي جزء منها
-✅ بدل كده قولي إن عندنا {products_count} منتج متنوع، واسأليه سؤال استكشافي واحد:
-   مثال: "عندنا {products_count} منتج متنوع 😊 قوليلي بتدوّر على إيه بالظبط وأرشحلك الأنسب"
+✅ بدل كده وصّلي المعنى ده بلهجة {bc.dialect}: إن عندنا {products_count} منتج متنوع،
+   واسأليه سؤال استكشافي واحد يحدد بيه اللي بيدوّر عليه عشان ترشحيله الأنسب
 لما يحدد احتياجه → وقتها بس ترشحي المنتج المناسب. تعاملي كبائع شاطر مش كتالوج.
 
 [🎯 سؤال الاستكشاف — كيّفيه على طبيعة البزنس]
@@ -597,10 +603,39 @@ def build_system_prompt(bundle, matched_product=None, state=None):
 # =====================================================================
 # KEYWORD MATCHING
 # =====================================================================
+import re as _re_kw
+
+# الكلمات القصيرة بتتطابق بحدود الكلمة، مش substring — عشان "خصم" ماتتلاقاش
+# جوه "الخصم"/"بخصم"، و"نصب" ماتتلاقاش جوه "منتصب". الكلمات الأطول (جُمل)
+# بتفضل substring عادي عشان تغطي اختلافات الصياغة.
+_SHORT_KW_LEN = 6
+# حروف عربية + لاتينية = "جوّه الكلمة"؛ أي حاجة غيرها = حد كلمة
+_AR_WORD = r"[\u0621-\u064A\u0660-\u0669a-zA-Z]"
+
+
+def _kw_hit(kw_value, msg_lower):
+    """مطابقة كلمة واحدة — بحدود الكلمة لو قصيرة، substring لو طويلة"""
+    kw = kw_value.lower().strip()
+    if not kw:
+        return False
+    if len(kw) >= _SHORT_KW_LEN or " " in kw:
+        return kw in msg_lower
+    # كلمة قصيرة: لازم تكون كلمة قائمة بذاتها (مسموح سوابق العطف/التعريف)
+    pattern = rf"(?<!{_AR_WORD}){_re_kw.escape(kw)}(?!{_AR_WORD})"
+    if _re_kw.search(pattern, msg_lower):
+        return True
+    # نسمح بالسوابق الشائعة: ال / و / ب / ف / لل
+    for pre in ("ال", "و", "ب", "ف", "لل", "وال", "بال"):
+        pattern = rf"(?<!{_AR_WORD}){pre}{_re_kw.escape(kw)}(?!{_AR_WORD})"
+        if _re_kw.search(pattern, msg_lower):
+            return True
+    return False
+
+
 def matches_category(message, keywords, category):
     msg_lower = message.lower()
     return any(
-        kw.value.lower() in msg_lower
+        _kw_hit(kw.value, msg_lower)
         for kw in keywords if kw.category == category
     )
 
@@ -609,7 +644,7 @@ def matched_keyword(message, keywords, category):
     """يرجّع أول كلمة مفتاحية اتطابقت (للتشخيص) أو None"""
     msg_lower = message.lower()
     for kw in keywords:
-        if kw.category == category and kw.value.lower() in msg_lower:
+        if kw.category == category and _kw_hit(kw.value, msg_lower):
             return kw.value
     return None
 
@@ -759,16 +794,43 @@ def get_ai_response(bundle, sender_id, user_message, state,
     elif state["stage"] == "NEW":
         state["stage"] = "INQUIRY"
 
+    # 🎯 "مهتم" = العميل **ردّ بعد ما سمع السعر**.
+    # ده أدق تعريف للاهتمام: اللي بيسمع السعر ويكمل كلام هو المهتم فعلاً،
+    # أما اللي بيسمع السعر ويسكت فده PRICE_SILENT (شريحة تانية خالص، وسلّم
+    # المتابعة بيتعامل معاها برسالة تطمين عن السعر مش رسالة اهتمام).
+    #
+    # ملاحظة على الترتيب: price_quoted/price_quoted_time بيتسجلوا تحت (بعد ما
+    # البوت يرد)، فلما نقراهم هنا بيكونوا من دورة سابقة — ووجود رسالة العميل
+    # الحالية دلوقتي معناه إنه ردّ بعد السعر. بنتحقق من التوقيت صراحةً عشان
+    # المنطق يفضل صح حتى لو الترتيب اتغيّر مستقبلاً.
+    if state["stage"] in ("NEW", "INQUIRY") and state.get("price_quoted"):
+        _pq_time = state.get("price_quoted_time", 0)
+        _replied_after_price = (state.get("last_message", 0) > _pq_time) if _pq_time else True
+        if _replied_after_price:
+            state["stage"] = "INTERESTED"
+            print(f"🎯 {sender_id}: INQUIRY → INTERESTED (ردّ بعد ما سمع السعر)")
+
     # ── تتبع الاعتراضات بالنوع ولكل منتج (للتحليلات) ──
+    # 🛡️ شرط أساسي: الاعتراض ما بيحصلش من فراغ — لازم العميل يكون شاف السعر
+    # الأول (price_quoted) أو يكون في محادثة فعلية (رسالتين+).
+    # من غير الشرط ده، أي حد بيفتح المحادثة بكلمة زي "خصم" (والإعلانات نفسها
+    # بتقول "بعد الخصم"!) كان بيتسجّل معترض من أول رسالة — وده كان بيلوّث
+    # التحليلات وبيخلي سلّم المتابعة يبعتله رسالة إنقاذ سعر من غير أي داعي.
+    _can_object = bool(state.get("price_quoted")) or state.get("messages_count", 0) >= 2
+
     _obj_types = []
-    if matches_category(user_message, keywords, "objection_expensive"):
-        _obj_types.append("expensive")
-    if matches_category(user_message, keywords, "objection_unsure"):
-        _obj_types.append("unsure")
-    if matches_category(user_message, keywords, "objection_later"):
-        _obj_types.append("later")
+    _obj_words = []
+    if _can_object:
+        for _cat, _tag in (("objection_expensive", "expensive"),
+                           ("objection_unsure", "unsure"),
+                           ("objection_later", "later")):
+            _w = matched_keyword(user_message, keywords, _cat)
+            if _w:
+                _obj_types.append(_tag)
+                _obj_words.append(f"{_tag}:«{_w}»")
 
     if _obj_types:
+        print(f"⚠️ Objection detected for {sender_id}: {', '.join(_obj_words)}")
         state["stage"] = "OBJECTION"
         state["objections_count"] = state.get("objections_count", 0) + 1
         # ننسب الاعتراض للمنتج الحالي (المطابق أو آخر منتج اتسأل عنه)
@@ -1220,14 +1282,26 @@ def _do_label_post(label_id, sender_id, access_token):
 
 
 def _apply_label_to_user(label, sender_id, page_id, access_token):
+    """
+    يطبّق label على عميل. بيرجّع True لو اتطبّق فعلاً.
+
+    ⚠️ تصحيح مهم: الكود القديم كان بيفترض إن code=100 معناه "الليبل اتطبّق
+    غالباً" — وده **غلط**. في Graph API الـ code=100 = Invalid parameter،
+    يعني الليبل **ما اتطبّقش خالص**. الافتراض ده كان بيخفي الفشل الحقيقي
+    ويطبع رسالة نجاح كاذبة في اللوجز، فالتاجر بيشوف عملاء مهتمين من غير تصنيف
+    والنظام مصرّ إنه نجح. دلوقتي بنعالجه كفشل حقيقي، وبنجرّب إصلاحه
+    (إعادة جلب الـ ID) وبنسجّل السبب بوضوح.
+    """
     label_id = _ensure_label_id(label, page_id, access_token)
     if not label_id:
-        return
+        print(f"⚠️ label '{label.name}': مافيش label id صالح — اتخطّت "
+              f"(شوف أخطاء Labels GET فوق)")
+        return False
     try:
         status, resp = _do_label_post(label_id, sender_id, access_token)
 
-        # ملاحظة: endpoint الـ label بيطبّق الليبل فعلياً حتى لو رجّع code 100.
-        # ده سلوك معروف — الليبل بيتحط بنجاح. فبنعيد المحاولة فقط لو الـ ID اتغيّر.
+        # code=100 = باراميتر غلط. أشهر سبب: الـ label ID المكاشّ اتغيّر
+        # أو اتمسح من على Meta → نجيب الـ ID من جديد ونعيد المحاولة.
         if status != 200 or not resp.get("success"):
             if resp.get("error", {}).get("code") == 100:
                 fresh_id = _refetch_label_id(label, page_id, access_token)
@@ -1235,19 +1309,26 @@ def _apply_label_to_user(label, sender_id, page_id, access_token):
                     print(f"🔄 label '{label.name}': ID اتحدّث {label_id}→{fresh_id}")
                     status, resp = _do_label_post(fresh_id, sender_id, access_token)
 
-        if status == 200 and resp.get("success"):
+        if status == 200 and (resp.get("success") or not resp.get("error")):
             print(f"🏷️  '{label.name}' → {sender_id} ✅")
-        elif status == 200:
-            print(f"🏷️  '{label.name}' → {sender_id} ✅ (resp={resp})")
-        else:
-            # code 100 هنا غالباً بيكون الليبل اتطبّق بالفعل (سلوك API معروف)
-            err = resp.get("error", {})
-            if err.get("code") == 100:
-                print(f"🏷️  '{label.name}' → {sender_id} (اتطبّق غالباً — API رجّع code 100)")
-            else:
-                print(f"⚠️ label '{label.name}': status={status} code={err.get('code')} — {err.get('message')}")
+            return True
+
+        err = resp.get("error", {}) or {}
+        code = err.get("code")
+        print(f"❌ فشل تطبيق label '{label.name}' على {sender_id}: "
+              f"status={status} code={code} — {err.get('message')}")
+        if code == 100:
+            print("   ⚠️ code=100 = باراميتر غير صالح → الليبل ما اتحطّش. "
+                  "الأسباب المحتملة: (1) الصفحة على New Pages Experience "
+                  "واللي بيوقف custom labels، (2) الـ label اتمسح من الإنبوكس، "
+                  "(3) الـ PSID مش تابع للصفحة دي. "
+                  "للتأكد: جرّب POST /{label_id}/label من Graph API Explorer")
+        elif code in (10, 200, 190):
+            print("   ⚠️ مشكلة صلاحيات — الـ token محتاج pages_manage_metadata")
+        return False
     except Exception as e:
         print(f"⚠️ Label apply error: {e}")
+        return False
 
 
 def apply_custom_labels(bundle, sender_id, page_id, label_names):
@@ -1362,8 +1443,10 @@ def do_process_message(tenant_id, sender_id, user_message, page_id, platform,
         state["handoff_reason"] = f"طلب موظف (كلمة: «{_human_kw}»)"
         state["handoff_time"] = time.time()
         print(f"🙋 Human keyword matched: «{_human_kw}» in message from {sender_id}")
+        import dialect_text
+        _dlc = bundle["bot_config"].dialect if bundle.get("bot_config") else "مصري"
         send_message(bundle, sender_id,
-            "تمام! هبعتلك موظف متخصص دلوقتي. لحظة صغيرة ومحدش هيسيبك وحدك 💙",
+            dialect_text.get_msg(_dlc, "handoff"),
             page_id, platform)
         apply_stage_labels(bundle, sender_id, page_id, "human_needed")
         # ── تنبيه تليجرام فوري: عميل طالب موظف ──
@@ -1424,8 +1507,10 @@ def do_process_message(tenant_id, sender_id, user_message, page_id, platform,
     if matched_product and matched_product.product_link:
         if matched_product.product_key not in state.get("links_sent", []):
             time.sleep(0.6)
+            import dialect_text
+            _dlc2 = bundle["bot_config"].dialect if bundle.get("bot_config") else "مصري"
             send_message(bundle, sender_id,
-                f"تقدر/ي تشوف المنتج بالتفصيل هنا 👇\n{matched_product.product_link}",
+                f"{dialect_text.get_msg(_dlc2, 'product_link')}\n{matched_product.product_link}",
                 page_id, platform)
             state.setdefault("links_sent", []).append(matched_product.product_key)
 

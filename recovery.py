@@ -27,11 +27,14 @@ def _pick_product(state, products):
     return next((p for p in products if p.product_key == key), None)
 
 
-def _build_smart_message(stage_row, state, product):
+def _build_smart_message(stage_row, state, product, dialect="مصري"):
     """
     يبني رسالة المتابعة المخصصة حسب سبب التوقف.
     بيدعم placeholders في نص المرحلة: {product} و {discount}
+    النصوص الذكية بتتبني بلهجة الـ tenant (من dialect_text) — قبل كده
+    كانت مكتوبة مصري حرفياً وبتتبعت مصري لكل التجار مهما كانت لهجتهم.
     """
+    import dialect_text
     base = (stage_row.message_text or "").strip()
     discount = stage_row.discount_percent or 0
     pname = product.name if product else ""
@@ -47,11 +50,9 @@ def _build_smart_message(stage_row, state, product):
     # ── شاف السعر وسكت: أخطر شريحة — رسالة تطمين عن السعر ──
     if reason == "PRICE_SILENT":
         pref = f"«{pname}»" if pname else "المنتج"
-        smart = (f"أهلاً يا فندم 😊 حسيت إن السعر ممكن يكون محتاج تفكير — ده طبيعي جداً. "
-                 f"بس افتكر إن الدفع عند الاستلام، يعني بتشوف {pref} بعينك الأول "
-                 f"ومفيش أي مخاطرة عليك.")
+        smart = dialect_text.get_msg(dialect, "fu_price", p=pref)
         if discount > 0:
-            smart += f"\nوعشان خاطرك، عندي خصم {discount}% لو أكدت طلبك النهاردة 🎁"
+            smart += dialect_text.get_msg(dialect, "fu_price_d", d=discount)
         return msg if (len(base) > 20 and "{" not in base) else smart
 
     # التخصيص الذكي حسب السبب — لو النص الأساسي مافيهوش تخصيص
@@ -59,25 +60,20 @@ def _build_smart_message(stage_row, state, product):
         # عميل اعترض (غالباً السعر) → رسالة إنقاذ
         prefix = ""
         if pname:
-            prefix = f"لسه فاكراك يا فندم 😊 بخصوص «{pname}» — "
-        if discount > 0:
-            offer = (f"{prefix}عشان خاطرك بس، قدرت أوفرلك خصم {discount}% "
-                     f"لو أكدت طلبك النهاردة. ده أحسن عرض أقدر أقدمه ليك 🎁")
-        else:
-            offer = (f"{prefix}فكرت تاني في الموضوع؟ لو السعر هو اللي مقلقك، "
-                     f"افتكر إن الدفع عند الاستلام — يعني مفيش أي مخاطرة عليك.")
+            prefix = dialect_text.get_msg(dialect, "fu_obj_pre", p=f"«{pname}»")
+        key = "fu_obj_d" if discount > 0 else "fu_obj"
+        offer = dialect_text.get_msg(dialect, key, pre=prefix, d=discount)
         # لو التاجر كاتب نص مخصص، نستخدمه؛ وإلا الذكي
         return msg if "{" not in base and len(base) > 20 else offer
 
     if reason in ("INTERESTED", "INQUIRY") and pname:
-        smart = (f"أهلاً بيك تاني يا فندم 👋 كنت بسأل عن «{pname}» — "
-                 f"لسه محتاج أي معلومة عنه؟ أنا موجودة أجاوبك على أي سؤال 😊")
+        smart = dialect_text.get_msg(dialect, "fu_interest", p=f"«{pname}»")
         if discount > 0:
-            smart += f"\nوعندي ليك مفاجأة: خصم {discount}% لو طلبت النهاردة 🎁"
+            smart += dialect_text.get_msg(dialect, "fu_interest_d", d=discount)
         return msg if len(base) > 20 and "{" not in base else smart
 
     # الافتراضي: نص المرحلة زي ما هو (أو رسالة عامة لو فاضي)
-    return msg or "أهلاً يا فندم 👋 لسه موجودة لو محتاج أي مساعدة 😊"
+    return msg or dialect_text.get_msg(dialect, "fu_generic")
 
 
 def run_followups(app):
@@ -139,7 +135,9 @@ def run_followups(app):
                     if not bundle:
                         break
                     product = _pick_product(state, bundle["products"])
-                    msg = _build_smart_message(st, state, product)
+                    _bc = bundle.get("bot_config")
+                    _dialect = (getattr(_bc, "dialect", None) or "مصري") if _bc else "مصري"
+                    msg = _build_smart_message(st, state, product, _dialect)
 
                     send_message(bundle, sender_id, msg,
                                  state["page_id"], state.get("platform", "facebook"))
