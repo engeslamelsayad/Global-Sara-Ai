@@ -88,6 +88,11 @@ def run(flask_app=None):
                 f"ALTER TABLE tenants ADD COLUMN {col} {typ}",
                 f"tenants.{col}")
 
+        print("\n=== 1ج-0. جدول bot_configs (أسلوب البيع) ===")
+        ok_all &= safe_alter(conn,
+            "ALTER TABLE bot_configs ADD COLUMN sales_style VARCHAR(20) DEFAULT 'balanced'",
+            "bot_configs.sales_style")
+
         print("\n=== 1ج. جدول bot_configs (العروض الديناميكية) ===")
         for col, typ in [
             ("offer_hesitation_enabled",   "BOOLEAN DEFAULT FALSE"),

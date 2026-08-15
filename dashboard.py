@@ -461,6 +461,11 @@ def settings_bot():
         if _mid and any(m["id"] == _mid for m in model_catalog.MODELS):
             bc.model_name = _mid
         bc.max_reply_lines = int(request.form.get("max_reply_lines") or 5)
+
+        # أسلوب البيع — من القائمة المسموحة بس
+        import sales_playbook
+        _style = (request.form.get("sales_style", "") or "").strip()
+        bc.sales_style = _style if _style in sales_playbook.STYLES else "balanced"
         bc.use_emojis  = bool(request.form.get("use_emojis"))
 
         forbidden_words = [w.strip() for w in request.form.get("forbidden_words", "").split(",") if w.strip()]

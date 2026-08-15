@@ -161,6 +161,8 @@ class BotConfig(db.Model):
     tone          = db.Column(db.String(200), default="ودود وعملي")
 
     max_reply_lines   = db.Column(db.Integer, default=5)
+    # أسلوب البيع: calm / balanced / assertive (شوف sales_playbook.py)
+    sales_style       = db.Column(db.String(20), default="balanced")
     use_emojis        = db.Column(db.Boolean, default=True)
     forbidden_words    = db.Column(db.Text)
     # افتتاحيات ضعيفة بتقتل البيعة من أول سطر: اعتذار، نفي، تشكيك، وكشف إنها موظفة مبيعات
@@ -196,7 +198,7 @@ class BotConfig(db.Model):
         return {
             "bot_name": self.bot_name, "bot_age": self.bot_age,
             "bot_persona": self.bot_persona, "dialect": self.dialect, "tone": self.tone,
-            "max_reply_lines": self.max_reply_lines, "use_emojis": self.use_emojis,
+            "max_reply_lines": self.max_reply_lines, "sales_style": self.sales_style, "use_emojis": self.use_emojis,
             "forbidden_words": json.loads(self.forbidden_words or "[]"),
             "forbidden_openers": json.loads(self.forbidden_openers or "[]"),
             "closing_reactions": json.loads(self.closing_reactions or "[]"),

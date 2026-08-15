@@ -43,6 +43,47 @@
     </div>
   </div>
 
+  <h3 style="margin-top:24px">🎯 أسلوب البيع</h3>
+  <p class="helper-text" style="margin-bottom:12px">
+    ده بيحدد إزاي البوت بيتصرف في لحظة السعر ولحظة الإغلاق — أهم لحظتين في المحادثة.
+  </p>
+  <div style="display:grid; gap:10px">
+    {% set _style = bc.sales_style or 'balanced' %}
+    <label style="display:flex; gap:10px; align-items:flex-start; border:2px solid {{ 'var(--primary)' if _style=='calm' else 'var(--border)' }}; border-radius:10px; padding:12px; cursor:pointer">
+      <input type="radio" name="sales_style" value="calm" {% if _style=='calm' %}checked{% endif %} style="margin-top:3px">
+      <span>
+        <b>🌿 هادئ</b><br>
+        <span style="font-size:13px; color:var(--text-soft)">
+          بيجاوب بوضوح ويساعد، وبيسيب القرار للعميل تماماً. مفيش إلحاح ولا تفاوض ولا خصومات
+          من نفسه. مناسب للبراندات الراقية أو المنتجات غالية الثمن.
+        </span>
+      </span>
+    </label>
+
+    <label style="display:flex; gap:10px; align-items:flex-start; border:2px solid {{ 'var(--primary)' if _style=='balanced' else 'var(--border)' }}; border-radius:10px; padding:12px; cursor:pointer">
+      <input type="radio" name="sales_style" value="balanced" {% if _style=='balanced' %}checked{% endif %} style="margin-top:3px">
+      <span>
+        <b>⚖️ متوازن</b> <span style="background:#DCFCE7; color:#059669; border-radius:6px; padding:1px 7px; font-size:11px; font-weight:700">موصى به</span><br>
+        <span style="font-size:13px; color:var(--text-soft)">
+          مابينطقش السعر عارياً — بيغلّفه بقيمة وبضمانة (الدفع عند الاستلام / الاسترجاع)
+          وبيختم بخطوة تالية. بيطلب الطلب بلطف من غير ضغط.
+        </span>
+      </span>
+    </label>
+
+    <label style="display:flex; gap:10px; align-items:flex-start; border:2px solid {{ 'var(--primary)' if _style=='assertive' else 'var(--border)' }}; border-radius:10px; padding:12px; cursor:pointer">
+      <input type="radio" name="sales_style" value="assertive" {% if _style=='assertive' %}checked{% endif %} style="margin-top:3px">
+      <span>
+        <b>🔥 حازم</b><br>
+        <span style="font-size:13px; color:var(--text-soft)">
+          بيسأل سؤال تأهيل قبل السعر لو العميل مش محدد، وبيقفل بشكل افتراضي
+          («أجهزلك الطلب؟»)، وبيتفاوض على الاعتراضات. <b>والخصم بيأجله لحظة التردد</b>
+          بدل ما يحرقه في أول رسالة. بيرفع التحويل عادةً — بس نبرته أكتر إلحاحاً.
+        </span>
+      </span>
+    </label>
+  </div>
+
   <h3 style="margin-top:24px">🧠 نموذج الرد على الزبائن</h3>
   <p class="helper-text" style="margin-bottom:12px">
     ده المحرك اللي بيفكر ويرد على عملائك. التكلفة تقديرية لـ <b>10,000 محادثة شهرياً</b>

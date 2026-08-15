@@ -352,6 +352,10 @@ def build_system_prompt(bundle, matched_product=None, state=None):
     import dialect_text
     _dialect_vocab = dialect_text.vocab_hint(bc.dialect)
 
+    # خريطة البيع حسب أسلوب البيع اللي اختاره التاجر
+    import sales_playbook
+    _playbook = sales_playbook.playbook(getattr(bc, "sales_style", None))
+
     static_prompt = f"""أنت {bc.bot_name}، {bc.bot_persona}.
 عمرك {bc.bot_age} سنة. بتتكلم بلهجة {bc.dialect} بنبرة {bc.tone}.
 
@@ -398,9 +402,10 @@ def build_system_prompt(bundle, matched_product=None, state=None):
 {"- يمكنك استخدام إيموجي بشكل معتدل (واحد أو اتنين في الرد، مش أكتر)" if bc.use_emojis else "- ممنوع استخدام أي إيموجي"}
 
 أمثلة على الطول الصح (المحتوى للتوضيح — صيغيه بلهجتك):
-- عميل: "بكام؟" → رد من سطر واحد: السعر + سؤال قصير للإغلاق
+- عميل: "بكام؟" → رد من سطر واحد: قيمة قصيرة + السعر + سؤال إغلاق
 - عميل: "متوفر؟" → رد من سطر: أيوه متوفر + سؤال
 - عميل: "إيه الفرق بين النوعين وأنهي أنسب لأوضتي؟" → هنا بس تفصّلي شوية
+{_playbook}
 
 [سياسات الشركة الثابتة]
 - طريقة الدفع: {policy.payment_method if policy else "غير محدد"}
@@ -433,10 +438,12 @@ def build_system_prompt(bundle, matched_product=None, state=None):
 - ممنوع تدّعي أي صفة مهنية متخصصة (دكتورة/مهندسة/خبيرة معتمدة) أو تدي
   تشخيصات أو أحكام فنية قاطعة — انتي بترشّحي منتج مناسب بس
 
-[معالجة الاعتراضات]
+[معالجة الاعتراضات — النصوص اللي كتبها صاحب البزنس]
+دي **المادة** اللي تردي بيها، والتوقيت والتكتيك في قسم الاعتراضات فوق:
 "غالي": {bc.objection_expensive_response or "اشرحي القيمة مقابل السعر"}
 "مش متأكد": {bc.objection_unsure_response or "اطمنيه بالضمان"}
 "هفكر": {bc.objection_later_response or "أكدي محدودية الكمية"}
+استخدميها كأفكار تعيدي صياغتها بلهجتك وباختصار — مش نص تنقليه حرفياً.
 
 [بيانات التواصل]
 رقم {('الواتساب' if bc.contact_channel == 'whatsapp' else 'التواصل')} الرسمي: {bc.contact_number or 'غير محدد'}
