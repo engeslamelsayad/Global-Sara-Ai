@@ -1098,6 +1098,45 @@ def telegram_test():
     return jsonify({"ok": ok})
 
 
+@dashboard_bp.route("/telegram/coach-settings", methods=["POST"])
+@login_required_dashboard
+def coach_settings():
+    """حفظ إعدادات مدرّب المبيعات"""
+    tenant = _current_tenant()
+    tenant.coach_enabled = request.form.get("coach_enabled") == "1"
+    try:
+        days = int(request.form.get("coach_interval_days", 3))
+    except (TypeError, ValueError):
+        days = 3
+    tenant.coach_interval_days = min(max(days, 1), 14)
+    db.session.commit()
+    flash("تم حفظ إعدادات مدرّب المبيعات ✅", "success")
+    return redirect(url_for("dashboard.telegram_page"))
+
+
+@dashboard_bp.route("/telegram/coach-test", methods=["POST"])
+@login_required_dashboard
+def coach_test():
+    """يبني ويبعت تقرير المدرّب فوراً (للتجربة)"""
+    tenant = _current_tenant()
+    if not tenant.telegram_enabled or not tenant.telegram_chat_id:
+        return jsonify({"ok": False, "error": "لم يتم ربط تليجرام بعد"}), 400
+    try:
+        import sales_coach
+        from flask import current_app
+        report = sales_coach.run_for_tenant(
+            current_app._get_current_object(), tenant.id, send=True)
+        if not report:
+            return jsonify({
+                "ok": False,
+                "error": "مافيش محادثات كفاية في الفترة دي لتحليل مفيد "
+                         "(الحد الأدنى 5 محادثات)"}), 400
+        return jsonify({"ok": True})
+    except Exception as e:
+        print(f"⚠️ Coach test failed: {e}")
+        return jsonify({"ok": False, "error": str(e)[:120]}), 500
+
+
 # =====================================================================
 # HANDOFFS — المحادثات المتوقفة (البوت ساكت فيها)
 # =====================================================================

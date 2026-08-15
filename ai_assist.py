@@ -455,3 +455,89 @@ def analyze_lost_conversations(samples, dialect="مصري"):
     if result.get("error") or "breakdown" not in result:
         return None
     return result
+
+
+# =====================================================================
+# 12) مدرّب المبيعات — تحليل مقارن بين المحادثات الكاسبة والخسرانة
+# =====================================================================
+SEGMENT_LABELS = {
+    "won":              "🏆 عملاء اشتروا فعلاً",
+    "price_silent":     "💸 عملاء سمعوا السعر وسكتوا",
+    "objection":        "⚠️ عملاء اعترضوا",
+    "engaged_no_order": "🤔 عملاء اتفاعلوا وماكملوش",
+    "handoff":          "🙋 عملاء طلبوا موظف بشري",
+    "complaint":        "🚨 عملاء اشتكوا",
+}
+
+
+def coach_analysis(segments, stats, business_name="", business_description="",
+                   dialect="مصري"):
+    """
+    تحليل مقارن: إيه الفرق بين المحادثة اللي كسبت واللي ضاعت؟
+    segments: {segment_key: [نص محادثة, ...]}
+    بيرجع dict فيه winning_pattern / losing_pattern / fixes / knowledge_gaps / quick_win
+    """
+    blocks = []
+    for key, convos in (segments or {}).items():
+        if not convos:
+            continue
+        label = SEGMENT_LABELS.get(key, key)
+        joined = "\n\n".join(f"[محادثة {i+1}]\n{c}" for i, c in enumerate(convos))
+        blocks.append(f"===== {label} ({len(convos)} عينة) =====\n{joined}")
+    if not blocks:
+        return None
+
+    corpus = "\n\n".join(blocks)
+    # سقف أمان للإدخال (تحكّم في التكلفة والتقطيع)
+    corpus = corpus[:22000]
+
+    numbers = (
+        f"إجمالي المحادثات: {stats.get('total', 0)} · "
+        f"اشتروا: {stats.get('won', 0)} · "
+        f"سكتوا بعد السعر: {stats.get('price_silent', 0)} · "
+        f"اعترضوا: {stats.get('objection', 0)} · "
+        f"اتفاعلوا وماكملوش: {stats.get('engaged_no_order', 0)}"
+    )
+
+    prompt = f"""أنت مدرّب مبيعات محترف بتراجع أداء بوت مبيعات على ماسنجر.
+
+البزنس: {business_name}
+{business_description}
+
+الأرقام: {numbers}
+
+دي محادثات حقيقية مقسّمة حسب نتيجتها:
+
+{corpus}
+
+مهمتك: **قارن** المحادثات اللي انتهت بشراء بالمحادثات اللي ضاعت، وحدد
+بالظبط إيه اللي بيفرق. ركّز على أنماط متكررة مش حالات فردية.
+
+قواعد مهمة:
+- كل ملاحظة لازم تكون مبنية على اللي شفته في المحادثات فعلاً — ممنوع كلام عام
+  زي "حسّن خدمة العملاء" أو "كن أسرع في الرد"
+- الاقتراحات لازم تكون **قابلة للتنفيذ النهاردة** (تعديل نص، إضافة معلومة
+  لمنتج، تغيير سؤال، إضافة قاعدة)
+- لو شفت البوت بيرد رد وحش أو بيفوّت فرصة، قول ده صراحةً
+- رتّب الإصلاحات بالأولوية حسب حجم تأثيرها على المبيعات
+
+رد بصيغة JSON فقط:
+{{
+  "winning_pattern": "جملتين: إيه المشترك بين المحادثات اللي كسبت؟",
+  "losing_pattern": "جملتين: إيه المشترك بين اللي ضاعت؟ فين بالظبط بتموت المحادثة؟",
+  "fixes": [
+    {{"title": "عنوان قصير للإصلاح",
+      "why": "الدليل من المحادثات",
+      "how": "الخطوة العملية بالظبط",
+      "priority": "high"}}
+  ],
+  "knowledge_gaps": ["سؤال العملاء سألوه والبوت مكانش عارف يجاوبه"],
+  "quick_win": "أسرع تغيير واحد لو التاجر هيعمل حاجة واحدة بس النهاردة"
+}}
+
+من 3 لـ 5 إصلاحات. اكتب كل النصوص بلهجة {dialect}."""
+
+    result = _ask_json(prompt, max_tokens=2500)
+    if result.get("error") or "fixes" not in result:
+        return None
+    return result

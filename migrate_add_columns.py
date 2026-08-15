@@ -74,6 +74,16 @@ def run(flask_app=None):
             "ALTER TABLE tenants ADD COLUMN currency VARCHAR(20) DEFAULT 'جنيه'",
             "tenants.currency")
 
+        print("\n=== 1ب-3. جدول tenants (مدرّب المبيعات) ===")
+        for col, typ in [
+            ("coach_enabled",       "BOOLEAN DEFAULT TRUE"),
+            ("coach_interval_days", "INTEGER DEFAULT 3"),
+            ("coach_last_sent",     "VARCHAR(10)"),
+        ]:
+            ok_all &= safe_alter(conn,
+                f"ALTER TABLE tenants ADD COLUMN {col} {typ}",
+                f"tenants.{col}")
+
         print("\n=== 1ج. جدول bot_configs (العروض الديناميكية) ===")
         for col, typ in [
             ("offer_hesitation_enabled",   "BOOLEAN DEFAULT FALSE"),

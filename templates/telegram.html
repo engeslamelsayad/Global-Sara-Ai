@@ -22,6 +22,68 @@
   </div>
   <div id="test-result" style="margin-top:12px; font-size:14px"></div>
 </div>
+
+<div class="card" style="border:2px solid var(--primary)">
+  <h3 style="margin-top:0">🎯 مدرّب المبيعات</h3>
+  <p style="font-size:14px; line-height:1.9; margin-top:0">
+    تقرير مختلف عن التقرير الأسبوعي: بيقرأ محادثات الفترة <b>بكل نتايجها</b> —
+    اللي اشتروا واللي ضاعوا — ويقارنهم عشان يقولك <b>إيه اللي بيفرق</b>،
+    وأسئلة العملاء اللي البوت مكانش عارف يجاوبها، وإصلاحات مرتّبة بالأولوية.
+  </p>
+
+  <form method="POST" action="{{ url_for('dashboard.coach_settings') }}">
+    <div class="checkbox-row" style="display:flex; align-items:center; gap:10px; margin-bottom:12px">
+      <input type="checkbox" id="coach_enabled" name="coach_enabled" value="1"
+             {% if tenant.coach_enabled %}checked{% endif %}>
+      <label for="coach_enabled" style="font-size:15px; margin:0">تفعيل تقرير المدرّب</label>
+    </div>
+
+    <label>كل كام يوم؟</label>
+    <select name="coach_interval_days" style="max-width:220px">
+      {% for d in [1, 2, 3, 5, 7, 14] %}
+        <option value="{{ d }}" {% if (tenant.coach_interval_days or 3) == d %}selected{% endif %}>
+          كل {{ d }} {{ 'يوم' if d == 1 else 'أيام' }}
+        </option>
+      {% endfor %}
+    </select>
+    <p style="font-size:12px; color:var(--text-soft); margin:6px 0 0">
+      بيتبعت الساعة 11 صباحاً بتوقيت مصر · محتاج 5 محادثات على الأقل في الفترة
+    </p>
+
+    <div style="display:flex; gap:10px; margin-top:16px; flex-wrap:wrap">
+      <button class="btn btn-primary" type="submit">💾 حفظ</button>
+      <button class="btn btn-secondary" type="button" onclick="sendCoachTest(this)">
+        🎯 جرّب التقرير دلوقتي
+      </button>
+    </div>
+  </form>
+  <div id="coach-result" style="margin-top:12px; font-size:14px"></div>
+</div>
+
+<script>
+async function sendCoachTest(btn) {
+  const box = document.getElementById('coach-result');
+  const old = btn.textContent;
+  btn.disabled = true; btn.textContent = '⏳ بيحلل المحادثات...';
+  box.textContent = 'التحليل ممكن ياخد لحد دقيقة';
+  box.style.color = '#64748b';
+  try {
+    const r = await fetch('{{ url_for("dashboard.coach_test") }}', {method: 'POST'});
+    const j = await r.json();
+    if (j.ok) {
+      box.textContent = '✅ التقرير اتبعت على تليجرام';
+      box.style.color = '#059669';
+    } else {
+      box.textContent = '⚠️ ' + (j.error || 'حصل خطأ');
+      box.style.color = '#dc2626';
+    }
+  } catch (e) {
+    box.textContent = '⚠️ تعذّر الاتصال بالسيرفر';
+    box.style.color = '#dc2626';
+  }
+  btn.disabled = false; btn.textContent = old;
+}
+</script>
 {% else %}
 <div class="card">
   <h3 style="margin-top:0">🔗 اربط تليجرام في 3 خطوات</h3>

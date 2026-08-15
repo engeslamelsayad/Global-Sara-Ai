@@ -55,6 +55,11 @@ class Tenant(db.Model):
     telegram_link_code    = db.Column(db.String(20))    # كود مؤقت لربط الحساب
     telegram_enabled      = db.Column(db.Boolean, default=False)
 
+    # مدرّب المبيعات — تقرير دوري بتحليل المحادثات
+    coach_enabled         = db.Column(db.Boolean, default=True)
+    coach_interval_days   = db.Column(db.Integer, default=3)
+    coach_last_sent       = db.Column(db.String(10))   # "2026-08-15"
+
     is_active     = db.Column(db.Boolean, default=True)
     plan          = db.Column(db.String(40), default="trial")
     created_at    = db.Column(db.DateTime, default=datetime.utcnow)

@@ -119,6 +119,14 @@ def _scheduler_loop(app):
             except Exception as e:
                 print(f"⚠️ Salary campaign error: {e}")
 
+            # 2.6) مدرّب المبيعات — تقرير دوري (كل 3 أيام افتراضياً)
+            # الفحص رخيص (query واحدة)؛ التحليل بيشتغل لما يستحق بس
+            try:
+                import sales_coach
+                sales_coach.check_and_run(app)
+            except Exception as e:
+                print(f"⚠️ Sales coach error: {e}")
+
             # 3) التقرير الأسبوعي — سبت 9ص مصر (7 UTC)
             is_report_time = (
                 now.weekday() == REPORT_WEEKDAY
