@@ -22,11 +22,17 @@ client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 ASSIST_MODEL = "claude-haiku-4-5-20251001"
 
+# نماذج مدرّب المبيعات — Sonnet أدق في المقارنة بين المحادثات الكاسبة والخسرانة
+COACH_MODELS = {
+    "haiku":  "claude-haiku-4-5-20251001",
+    "sonnet": "claude-sonnet-4-6",
+}
 
-def _ask_json(prompt, max_tokens=800):
+
+def _ask_json(prompt, max_tokens=800, model=None):
     """ينادي Claude ويطلب رد JSON فقط، مع parsing آمن ومرن"""
     response = client.messages.create(
-        model=ASSIST_MODEL,
+        model=model or ASSIST_MODEL,
         max_tokens=max_tokens,
         system="ترد بصيغة JSON صحيحة فقط، بدون أي نص إضافي أو markdown fences.",
         messages=[{"role": "user", "content": prompt}],
@@ -471,11 +477,13 @@ SEGMENT_LABELS = {
 
 
 def coach_analysis(segments, stats, business_name="", business_description="",
-                   dialect="مصري"):
+                   dialect="مصري", corpus_cap=58_000, model_key="haiku",
+                   previous_fixes=None):
     """
     تحليل مقارن: إيه الفرق بين المحادثة اللي كسبت واللي ضاعت؟
     segments: {segment_key: [نص محادثة, ...]}
-    بيرجع dict فيه winning_pattern / losing_pattern / fixes / knowledge_gaps / quick_win
+    corpus_cap: سقف حروف الإدخال (بيتحدد من مستوى العمق)
+    model_key: "haiku" (اقتصادي) أو "sonnet" (أدق في المقارنات)
     """
     blocks = []
     for key, convos in (segments or {}).items():
@@ -487,24 +495,64 @@ def coach_analysis(segments, stats, business_name="", business_description="",
     if not blocks:
         return None
 
-    corpus = "\n\n".join(blocks)
-    # سقف أمان للإدخال (تحكّم في التكلفة والتقطيع)
-    corpus = corpus[:22000]
+    corpus = "\n\n".join(blocks)[:corpus_cap]
+
+    sampled = stats.get("sampled", 0)
+    total = stats.get("total", 0)
+    coverage = (f"(العينة دي {sampled} محادثة مقروءة بالتفصيل من إجمالي {total} — "
+                f"الأرقام تحت محسوبة من الـ {total} كلهم)"
+                if sampled and sampled < total else "")
 
     numbers = (
-        f"إجمالي المحادثات: {stats.get('total', 0)} · "
+        f"إجمالي المحادثات: {total} · "
         f"اشتروا: {stats.get('won', 0)} · "
         f"سكتوا بعد السعر: {stats.get('price_silent', 0)} · "
         f"اعترضوا: {stats.get('objection', 0)} · "
-        f"اتفاعلوا وماكملوش: {stats.get('engaged_no_order', 0)}"
+        f"اتفاعلوا وماكملوش: {stats.get('engaged_no_order', 0)} · "
+        f"طلبوا موظف: {stats.get('handoff', 0)} · "
+        f"شكاوى: {stats.get('complaint', 0)}"
     )
+
+    extra = []
+    aw, al = stats.get("avg_turns_won", 0), stats.get("avg_turns_lost", 0)
+    if aw and al:
+        extra.append(f"متوسط عدد رسائل العميل: في المحادثة الكاسبة {aw} · في الخسرانة {al}")
+    dp = stats.get("death_points") or []
+    if dp:
+        items = " · ".join(f"«{d['q']}» ({d['n']})" for d in dp[:6])
+        extra.append(f"آخر حاجة قالها العملاء قبل ما يختفوا (من كل المحادثات): {items}")
+    tq = stats.get("top_questions") or []
+    if tq:
+        items = " · ".join(f"«{q['q']}» ({q['n']})" for q in tq[:8])
+        extra.append(f"أكتر أسئلة اتكررت: {items}")
+    extra_txt = "\n".join(f"- {e}" for e in extra)
+
+    # ذاكرة التقرير السابق — تمنع التكرار وتخلي التقرير يتابع التنفيذ
+    prev_txt = ""
+    if previous_fixes:
+        items = "\n".join(f"  {i+1}. {t}" for i, t in enumerate(previous_fixes[:6]) if t)
+        if items:
+            prev_txt = f"""
+
+📌 التوصيات اللي اتقالت في التقرير اللي فات:
+{items}
+
+مهم جداً بخصوصها:
+- شوف في المحادثات الجديدة هل التاجر نفّذها ولا لأ
+- لو **اتنفذت**: ماتعيدهاش، وقول في winning_pattern لو شفت أثرها
+- لو **ماتنفذتش ولسه بتضيّع بيع**: كررها بس **بأولوية أعلى** واذكر إنها متكررة
+- ركّز باقي التوصيات على حاجات **جديدة** لسه مااتقالتش"""
+
+    prev_txt = prev_txt
 
     prompt = f"""أنت مدرّب مبيعات محترف بتراجع أداء بوت مبيعات على ماسنجر.
 
 البزنس: {business_name}
 {business_description}
 
-الأرقام: {numbers}
+📊 أرقام الفترة {coverage}:
+{numbers}
+{extra_txt}{prev_txt}
 
 دي محادثات حقيقية مقسّمة حسب نتيجتها:
 
@@ -513,12 +561,16 @@ def coach_analysis(segments, stats, business_name="", business_description="",
 مهمتك: **قارن** المحادثات اللي انتهت بشراء بالمحادثات اللي ضاعت، وحدد
 بالظبط إيه اللي بيفرق. ركّز على أنماط متكررة مش حالات فردية.
 
+استخدم الأرقام فوق مع المحادثات: مثلاً لو "آخر حاجة قالها العملاء قبل ما
+يختفوا" فيها سؤال متكرر، ده دليل قوي على نقطة انهيار محددة — دوّر عليها في
+المحادثات وقول البوت رد عليها إزاي وكان المفروض يرد إزاي.
+
 قواعد مهمة:
-- كل ملاحظة لازم تكون مبنية على اللي شفته في المحادثات فعلاً — ممنوع كلام عام
+- كل ملاحظة لازم تكون مبنية على اللي شفته فعلاً — ممنوع كلام عام
   زي "حسّن خدمة العملاء" أو "كن أسرع في الرد"
 - الاقتراحات لازم تكون **قابلة للتنفيذ النهاردة** (تعديل نص، إضافة معلومة
   لمنتج، تغيير سؤال، إضافة قاعدة)
-- لو شفت البوت بيرد رد وحش أو بيفوّت فرصة، قول ده صراحةً
+- لو شفت البوت بيرد رد وحش أو بيفوّت فرصة، قول ده صراحةً واقتبس الرد
 - رتّب الإصلاحات بالأولوية حسب حجم تأثيرها على المبيعات
 
 رد بصيغة JSON فقط:
@@ -527,7 +579,7 @@ def coach_analysis(segments, stats, business_name="", business_description="",
   "losing_pattern": "جملتين: إيه المشترك بين اللي ضاعت؟ فين بالظبط بتموت المحادثة؟",
   "fixes": [
     {{"title": "عنوان قصير للإصلاح",
-      "why": "الدليل من المحادثات",
+      "why": "الدليل من المحادثات أو الأرقام",
       "how": "الخطوة العملية بالظبط",
       "priority": "high"}}
   ],
@@ -535,9 +587,10 @@ def coach_analysis(segments, stats, business_name="", business_description="",
   "quick_win": "أسرع تغيير واحد لو التاجر هيعمل حاجة واحدة بس النهاردة"
 }}
 
-من 3 لـ 5 إصلاحات. اكتب كل النصوص بلهجة {dialect}."""
+من 3 لـ 6 إصلاحات. اكتب كل النصوص بلهجة {dialect}."""
 
-    result = _ask_json(prompt, max_tokens=2500)
+    model = COACH_MODELS.get(model_key, COACH_MODELS["haiku"])
+    result = _ask_json(prompt, max_tokens=3000, model=model)
     if result.get("error") or "fixes" not in result:
         return None
     return result

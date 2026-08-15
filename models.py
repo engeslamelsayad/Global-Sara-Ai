@@ -57,8 +57,13 @@ class Tenant(db.Model):
 
     # مدرّب المبيعات — تقرير دوري بتحليل المحادثات
     coach_enabled         = db.Column(db.Boolean, default=True)
-    coach_interval_days   = db.Column(db.Integer, default=3)
+    coach_interval_days   = db.Column(db.Integer, default=1)   # يومي
     coach_last_sent       = db.Column(db.String(10))   # "2026-08-15"
+    coach_depth           = db.Column(db.String(20), default="deep")  # light/balanced/deep
+    coach_model           = db.Column(db.String(20), default="sonnet")     # haiku/sonnet
+    # نافذة القراءة منفصلة عن دورية الإرسال: تقدر تبعت يومياً وتقرا آخر 5 أيام
+    coach_lookback_days   = db.Column(db.Integer, default=7)   # 0 = زي دورية الإرسال
+    coach_last_fixes      = db.Column(db.Text)                 # JSON: توصيات آخر تقرير
 
     is_active     = db.Column(db.Boolean, default=True)
     plan          = db.Column(db.String(40), default="trial")

@@ -77,8 +77,12 @@ def run(flask_app=None):
         print("\n=== 1ب-3. جدول tenants (مدرّب المبيعات) ===")
         for col, typ in [
             ("coach_enabled",       "BOOLEAN DEFAULT TRUE"),
-            ("coach_interval_days", "INTEGER DEFAULT 3"),
+            ("coach_interval_days", "INTEGER DEFAULT 1"),
             ("coach_last_sent",     "VARCHAR(10)"),
+            ("coach_depth",         "VARCHAR(20) DEFAULT 'deep'"),
+            ("coach_model",         "VARCHAR(20) DEFAULT 'sonnet'"),
+            ("coach_lookback_days", "INTEGER DEFAULT 7"),
+            ("coach_last_fixes",    "TEXT"),
         ]:
             ok_all &= safe_alter(conn,
                 f"ALTER TABLE tenants ADD COLUMN {col} {typ}",

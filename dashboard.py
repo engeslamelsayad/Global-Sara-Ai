@@ -1109,6 +1109,20 @@ def coach_settings():
     except (TypeError, ValueError):
         days = 3
     tenant.coach_interval_days = min(max(days, 1), 14)
+
+    depth = request.form.get("coach_depth", "balanced")
+    tenant.coach_depth = depth if depth in ("light", "balanced", "deep") else "balanced"
+
+    model = request.form.get("coach_model", "haiku")
+    tenant.coach_model = model if model in ("haiku", "sonnet") else "haiku"
+
+    # نافذة القراءة (0 = زي دورية الإرسال)
+    try:
+        lb = int(request.form.get("coach_lookback_days", 0))
+    except (TypeError, ValueError):
+        lb = 0
+    tenant.coach_lookback_days = min(max(lb, 0), 30)
+
     db.session.commit()
     flash("تم حفظ إعدادات مدرّب المبيعات ✅", "success")
     return redirect(url_for("dashboard.telegram_settings"))

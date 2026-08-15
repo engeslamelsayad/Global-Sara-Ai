@@ -50,6 +50,48 @@
       بيتبعت الساعة 11 صباحاً بتوقيت مصر · محتاج 5 محادثات على الأقل في الفترة
     </p>
 
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px">
+      <div>
+        <label>يقرا محادثات آخر كام يوم؟</label>
+        <select name="coach_lookback_days" id="coach_lookback" onchange="updCost()">
+          <option value="0" {% if not tenant.coach_lookback_days %}selected{% endif %}>زي دورية الإرسال</option>
+          {% for d in [3, 5, 7, 14, 30] %}
+            <option value="{{ d }}" {% if tenant.coach_lookback_days == d %}selected{% endif %}>آخر {{ d }} يوم</option>
+          {% endfor %}
+        </select>
+        <p style="font-size:12px; color:var(--text-soft); margin:6px 0 0">
+          لو بتبعت يومي، خلّي النافذة 5 أو 7 أيام — العينة الصغيرة بتضعّف المقارنة
+        </p>
+      </div>
+      <div>
+        <label>عمق التحليل</label>
+        <select name="coach_depth" id="coach_depth" onchange="updCost()">
+          <option value="light"    {% if tenant.coach_depth == 'light' %}selected{% endif %}>خفيف — 24 محادثة</option>
+          <option value="balanced" {% if (tenant.coach_depth or 'balanced') == 'balanced' %}selected{% endif %}>متوازن — 60 محادثة</option>
+          <option value="deep"     {% if tenant.coach_depth == 'deep' %}selected{% endif %}>عميق — 120 محادثة</option>
+        </select>
+      </div>
+    </div>
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px">
+      <div>
+        <label>دقة التحليل</label>
+        <select name="coach_model" id="coach_model" onchange="updCost()">
+          <option value="haiku"  {% if (tenant.coach_model or 'haiku') == 'haiku' %}selected{% endif %}>عادي (Haiku) — اقتصادي</option>
+          <option value="sonnet" {% if tenant.coach_model == 'sonnet' %}selected{% endif %}>عالي (Sonnet) — أدق</option>
+        </select>
+      </div>
+      <div></div>
+    </div>
+
+    <div id="cost-box" style="background:var(--bg); border:1px solid var(--border); border-radius:10px; padding:10px 14px; margin-top:12px; font-size:13px; color:var(--text-soft)"></div>
+
+    <p style="font-size:12px; color:var(--text-soft); margin:10px 0 0; line-height:1.8">
+      💡 <b>مهم:</b> الأرقام في التقرير (نقاط الموت، الأسئلة المتكررة، معدلات التحويل)
+      محسوبة من <b>كل</b> محادثات الفترة مهما كان عددها. عمق التحليل بيحدد كام محادثة
+      الذكاء الاصطناعي هيقراها <b>بالتفصيل</b> بس.
+    </p>
+
     <div style="display:flex; gap:10px; margin-top:16px; flex-wrap:wrap">
       <button class="btn btn-primary" type="submit">💾 حفظ</button>
       <button class="btn btn-secondary" type="button" onclick="sendCoachTest(this)">
@@ -61,6 +103,38 @@
 </div>
 
 <script>
+// تقدير التكلفة — نفس ثوابت sales_coach.py
+const DEPTHS = {light:{n:24,ch:900}, balanced:{n:60,ch:900}, deep:{n:120,ch:800}};
+const PRICES = {haiku:{in:1,out:5,name:'Haiku'}, sonnet:{in:3,out:15,name:'Sonnet'}};
+const CHARS_PER_TOKEN = 2.2;   // تقدير محافظ للعربي
+
+function updCost() {
+  const d = DEPTHS[document.getElementById('coach_depth').value] || DEPTHS.balanced;
+  const p = PRICES[document.getElementById('coach_model').value] || PRICES.haiku;
+  const days = parseInt(document.querySelector('[name=coach_interval_days]').value) || 3;
+  const lbSel = parseInt(document.getElementById('coach_lookback').value) || 0;
+  const lb = lbSel || days;
+  const inTok = (d.n * d.ch) / CHARS_PER_TOKEN + 900;
+  const perRun = inTok / 1e6 * p.in + 3000 / 1e6 * p.out;
+  const perMonth = perRun * (30 / days);
+  let html =
+    '💰 التكلفة التقديرية: <b>$' + perRun.toFixed(3) + '</b> للتقرير الواحد · ' +
+    '<b>$' + perMonth.toFixed(2) + '</b> في الشهر تقريباً ' +
+    '<span style="opacity:.7">(لحد ' + d.n + ' محادثة · ' + p.name +
+    ' · كل ' + days + ' أيام · نافذة ' + lb + ' يوم)</span>';
+  if (lb <= 2 && d.n >= 60) {
+    html += '<br><span style="color:#d97706">⚠️ نافذة ' + lb + ' يوم صغيرة على عمق ' +
+            d.n + ' محادثة — غالباً مش هتتملي. زوّد النافذة لـ 5 أو 7 أيام.</span>';
+  }
+  document.getElementById('cost-box').innerHTML = html;
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+  const sel = document.querySelector('[name=coach_interval_days]');
+  if (sel) sel.addEventListener('change', updCost);
+  updCost();
+});
+
 async function sendCoachTest(btn) {
   const box = document.getElementById('coach-result');
   const old = btn.textContent;
