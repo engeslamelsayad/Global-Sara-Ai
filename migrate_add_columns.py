@@ -255,16 +255,18 @@ def run(flask_app=None):
             print(f"  ⚠️ labels backfill: {e}")
             ok_all = False
 
-        print("\n=== 9. النموذج الافتراضي → Haiku ===")
-        # الحسابات القديمة اتزرعت بـ Sonnet كافتراضي. بنحوّلهم لـ Haiku
-        # (أرخص ~3x وأداؤه قريب في مهام البيع). التاجر يقدر يرجّعه من الداشبورد.
+        print("\n=== 9. النموذج الافتراضي للحسابات الفاضية → Haiku ===")
+        # 🐛 إصلاح باج: النسخة القديمة كانت بتحوّل "claude-sonnet-4-6" كمان
+        # لـ Haiku. ده كان معناه إن أي تاجر يختار Sonnet من الداشبورد،
+        # اختياره بيتمسح **عند كل restart** ويرجع Haiku من غير ما يعرف —
+        # يعني الإعداد مش بيثبت أصلاً. التحويل ده كان لمرة واحدة وخلص،
+        # فدلوقتي بنطبّق على الفاضي بس.
         try:
             from models import BotConfig
-            OLD_DEFAULT = "claude-sonnet-4-6"
             NEW_DEFAULT = "claude-haiku-4-5-20251001"
             switched = 0
             for bc in BotConfig.query.all():
-                if (bc.model_name or "").strip() in ("", OLD_DEFAULT, "None"):
+                if (bc.model_name or "").strip() in ("", "None"):
                     bc.model_name = NEW_DEFAULT
                     switched += 1
             if switched:
@@ -276,6 +278,50 @@ def run(flask_app=None):
             db.session.rollback()
             print(f"  ⚠️ model default switch: {e}")
             ok_all = False
+
+        print("\n=== 9ب. ترقية النماذج للجيل الحالي ===")
+        # Sonnet 5 أحدث **وأرخص** من 4.6 ($2/$10 بدل $3/$15) — مكسب مزدوج.
+        # Opus 5 بنفس سعر 4.8 بالظبط. النموذجين القدام لسه شغالين عند
+        # Anthropic، فدي ترقية اختيارية مش إصلاح عطل — ومابنلمسش Haiku
+        # لأنه لسه الأحدث في فئته.
+        try:
+            from models import BotConfig
+            UPGRADES = {
+                "claude-sonnet-4-6": "claude-sonnet-5",
+                "claude-opus-4-8":   "claude-opus-5",
+            }
+            upgraded = 0
+            for bc in BotConfig.query.all():
+                cur = (bc.model_name or "").strip()
+                if cur in UPGRADES:
+                    bc.model_name = UPGRADES[cur]
+                    upgraded += 1
+            if upgraded:
+                db.session.commit()
+                print(f"  ✅ {upgraded} حساب اترقّى للجيل الحالي (Sonnet 5 / Opus 5)")
+            else:
+                print("  ⏭  مفيش حسابات على الجيل القديم")
+        except Exception as e:
+            db.session.rollback()
+            print(f"  ⚠️ model generation upgrade: {e}")
+            ok_all = False
+
+        print("\n=== 9ج. ترقية نموذج مدرّب المبيعات ===")
+        try:
+            from models import Tenant
+            fixed = 0
+            for t in Tenant.query.all():
+                if (getattr(t, "coach_model", None) or "").strip() == "claude-sonnet-4-6":
+                    t.coach_model = "sonnet"   # بيتحوّل لـ Sonnet 5 من COACH_MODELS
+                    fixed += 1
+            if fixed:
+                db.session.commit()
+                print(f"  ✅ {fixed} حساب: نموذج المدرّب اتظبط")
+            else:
+                print("  ⏭  نماذج المدرّب سليمة")
+        except Exception as e:
+            db.session.rollback()
+            print(f"  ⚠️ coach model upgrade: {e}")
 
         print("\n=== 10. حملة يوم المرتبات — صف افتراضي لكل tenant ===")
         # الجدول نفسه بيتعمل من db.create_all() (جدول جديد مش عمود جديد).
