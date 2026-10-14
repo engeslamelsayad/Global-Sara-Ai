@@ -263,7 +263,7 @@ def run(flask_app=None):
         # فدلوقتي بنطبّق على الفاضي بس.
         try:
             from models import BotConfig
-            NEW_DEFAULT = "claude-haiku-4-5-20251001"
+            from model_catalog import DEFAULT_MODEL_ID as NEW_DEFAULT
             switched = 0
             for bc in BotConfig.query.all():
                 if (bc.model_name or "").strip() in ("", "None"):
@@ -279,17 +279,13 @@ def run(flask_app=None):
             print(f"  ⚠️ model default switch: {e}")
             ok_all = False
 
-        print("\n=== 9ب. ترقية النماذج للجيل الحالي ===")
-        # Sonnet 5 أحدث **وأرخص** من 4.6 ($2/$10 بدل $3/$15) — مكسب مزدوج.
-        # Opus 5 بنفس سعر 4.8 بالظبط. النموذجين القدام لسه شغالين عند
-        # Anthropic، فدي ترقية اختيارية مش إصلاح عطل — ومابنلمسش Haiku
-        # لأنه لسه الأحدث في فئته.
+        print("\n=== 9ب. ترقية النماذج للجيل الحالي (5.5) ===")
+        # أكتوبر 2026: Haiku 4.5 → 5.5 (أرخص 10x)، Sonnet 5 → 5.5 (نفس السعر)،
+        # Opus 5 → 5.5 (أرخص). القايمة في model_catalog.LEGACY_UPGRADES.
+        # idempotent: اللي على 5.5 خلاص مش في القايمة فمابيتلمسش.
         try:
             from models import BotConfig
-            UPGRADES = {
-                "claude-sonnet-4-6": "claude-sonnet-5",
-                "claude-opus-4-8":   "claude-opus-5",
-            }
+            from model_catalog import LEGACY_UPGRADES as UPGRADES
             upgraded = 0
             for bc in BotConfig.query.all():
                 cur = (bc.model_name or "").strip()
@@ -298,7 +294,7 @@ def run(flask_app=None):
                     upgraded += 1
             if upgraded:
                 db.session.commit()
-                print(f"  ✅ {upgraded} حساب اترقّى للجيل الحالي (Sonnet 5 / Opus 5)")
+                print(f"  ✅ {upgraded} حساب اترقّى للجيل الحالي (5.5)")
             else:
                 print("  ⏭  مفيش حسابات على الجيل القديم")
         except Exception as e:

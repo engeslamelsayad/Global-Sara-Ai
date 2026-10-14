@@ -142,7 +142,8 @@ def _run_campaign(app, tenant_id, campaign_id):
                 continue
 
             product = _pick_product(state, bundle["products"])
-            msg = _build_message(camp, product)
+            _bc = bundle.get("bot_config")
+            msg = _build_message(camp, product, _bc.dialect if _bc else "مصري")
 
             ok = _send_with_status(bundle, sender_id, msg, state["page_id"])
             if not ok:
@@ -241,20 +242,19 @@ def _is_eligible(state, now):
 # =====================================================================
 # بناء الرسالة
 # =====================================================================
-DEFAULT_MESSAGE = (
-    "أهلاً بيك يا فندم 😊 بمناسبة أول الشهر عملنا لحضرتك عرض خاص: "
-    "خصم {discount}% على {product} اللي كنت بتسأل عنه 🎁\n"
-    "العرض لفترة محدودة — والدفع عند الاستلام زي ما هو، "
-    "يعني بتشوف المنتج بعينك الأول. تحب أحجزهولك قبل ما العرض يخلص؟ 💙"
-)
-
-
-def _build_message(camp, product):
-    """يبني الرسالة — بيدعم {product} و {discount} زي مراحل السلّم"""
-    template = (camp.message_text or "").strip() or DEFAULT_MESSAGE
-
+def _build_message(camp, product, dialect="مصري"):
+    """
+    يبني الرسالة — بيدعم {product} و {discount} زي مراحل السلّم.
+    لو التاجر ماكتبش نص خاص → الرسالة الافتراضية بلهجة الـ tenant (dialect_text).
+    """
+    import dialect_text
     pname = f"«{product.name}»" if (product and product.name) else "المنتج"
+    discount = str(camp.discount_percent or 0)
+
+    template = (camp.message_text or "").strip()
+    if not template:
+        return dialect_text.get_msg(dialect, "salary", p=pname, d=discount)
 
     return (template
             .replace("{product}", pname)
-            .replace("{discount}", str(camp.discount_percent or 0)))
+            .replace("{discount}", discount))
