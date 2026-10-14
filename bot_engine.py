@@ -1795,17 +1795,45 @@ AUTO_TRUST_THRESHOLD = 3
 # حتى لو كان لعميل غريب (موديريتور بيراسل صاحب تعليق يدوياً) → إيقاف دايماً
 META_INBOX_APP_ID = "263902037430900"
 
-_outreach_tracker = {}        # {(tenant_id, app_id): set(user_ids)}
+_outreach_tracker = {}        # {(tenant_id, app_id, kind): set(user_ids)}
 _outreach_lock = threading.Lock()
 
+# ── الرد الآلي السريع (أكتوبر 2026) ───────────────────────────────────
+# أدوات الرد التلقائي على الصفحة (instant reply / ردود جاهزة) بترد خلال ثانية من
+# رسالة العميل — وده جوّه محادثة شغالة، فكان بيتفسّر "موديريتور" والبوت بيوقف نفسه
+# (اتشاف في logs محادثة حقيقية: app=517173525759142 رد بعد ثانية → bot paused).
+# مفيش إنسان بيقرا ويكتب رد في أقل من 3 ثواني → ده آلي: مانوقفش البوت.
+AUTOMATION_REPLY_WINDOW_MS = 3000
+_last_customer_msg = {}       # {(tenant_id, user_psid): Meta timestamp بالـ ms}
 
-def _note_outreach(tenant_id, app_id, user_psid):
+
+def note_customer_message(tenant_id, user_psid, ts_ms=None):
+    """بيتنده من الـ webhook مع كل رسالة عميل (قبل الـ debounce) — للمقارنة مع توقيت الـ echo"""
+    _last_customer_msg[(tenant_id, user_psid)] = ts_ms or int(time.time() * 1000)
+    if len(_last_customer_msg) > 5000:
+        cutoff = int(time.time() * 1000) - 3600 * 1000
+        for k in list(_last_customer_msg.keys()):
+            if _last_customer_msg.get(k, 0) < cutoff:
+                _last_customer_msg.pop(k, None)
+
+
+_TRUST_KINDS = {
+    # kind: (رسالة اللوج قبل الحد, label التوثيق, سبب التوثيق في اللوج)
+    "outreach":  ("Outreach echo", "اتوثّق تلقائياً — رسائل افتتاحية جماعية", "راسل {n} غرباء"),
+    "fast_reply": ("Fast auto-reply echo", "اتوثّق تلقائياً — رد آلي فوري على العملاء",
+                   "رد خلال ثواني على {n} عملاء مختلفين"),
+}
+
+
+def _note_outreach(tenant_id, app_id, user_psid, kind="outreach"):
     """
-    يسجّل إن التطبيق ده راسل عميل غريب. لو وصل للحد → توثيق تلقائي.
+    يسجّل إن التطبيق ده اتصرف كأداة آلية مع عميل (outreach لغريب، أو رد فوري).
+    لو وصل لـ AUTO_TRUST_THRESHOLD عملاء مختلفين → توثيق تلقائي.
     بيرجّع True لو التطبيق اتوثّق في النداء ده.
     """
+    log_name, trust_label, trust_reason = _TRUST_KINDS[kind]
     with _outreach_lock:
-        key = (tenant_id, app_id)
+        key = (tenant_id, app_id, kind)
         users = _outreach_tracker.setdefault(key, set())
         users.add(user_psid)
         count = len(users)
@@ -1814,7 +1842,7 @@ def _note_outreach(tenant_id, app_id, user_psid):
             _outreach_tracker.clear()
             _outreach_tracker[key] = users
     if count < AUTO_TRUST_THRESHOLD:
-        print(f"🤖 Outreach echo (app={app_id}) → غريب رقم {count}/{AUTO_TRUST_THRESHOLD} "
+        print(f"🤖 {log_name} (app={app_id}) → عميل رقم {count}/{AUTO_TRUST_THRESHOLD} "
               f"— مفيش إيقاف")
         return False
 
@@ -1824,11 +1852,11 @@ def _note_outreach(tenant_id, app_id, user_psid):
         if not BotAppId.query.filter_by(tenant_id=tenant_id, app_id=app_id).first():
             db.session.add(BotAppId(
                 tenant_id=tenant_id, app_id=app_id,
-                label="اتوثّق تلقائياً — رسائل افتتاحية جماعية"))
+                label=trust_label))
             db.session.commit()
             invalidate_tenant_cache()
             print(f"✅ Auto-trusted app {app_id} for tenant {tenant_id} "
-                  f"(راسل {count} غرباء — ده تطبيق آلي مش إنسان)")
+                  f"({trust_reason.format(n=count)} — ده تطبيق آلي مش إنسان)")
     except Exception as e:
         db.session.rollback()
         print(f"⚠️ Auto-trust failed for app {app_id}: {e}")
@@ -1879,6 +1907,20 @@ def handle_echo(bundle, event):
     # → دي رسالة افتتاحية من أداة آلية (رد تعليقات / حملة) → مانوقفش البوت.
     # الموديريتور البشري بيتدخل جوّه محادثة شغالة → بيقع في بلوك الإيقاف تحت.
     has_conversation = bool(state and state.get("history"))
+
+    # ── ⚡ رد آلي فوري: الصدى جه خلال ثواني من رسالة العميل → مش إنسان ──
+    # بنقارن توقيتات Meta نفسها (مش وقت الوصول عندنا) عشان تأخير الشبكة مايأثرش.
+    cust_ts = _last_customer_msg.get((tenant_id, user_psid))
+    echo_ts = event.get("timestamp") or int(time.time() * 1000)
+    if cust_ts and 0 <= echo_ts - cust_ts <= AUTOMATION_REPLY_WINDOW_MS:
+        if echo_app_id == META_INBOX_APP_ID:
+            # إنبوكس Meta بيستخدمه البشر كمان → مانوقفش دلوقتي بس عمرنا ما نوثّقه
+            print(f"⚡ Fast echo من إنبوكس Meta ({echo_ts - cust_ts}ms بعد العميل) "
+                  f"→ رد آلي (instant reply) — مفيش إيقاف")
+        else:
+            _note_outreach(tenant_id, echo_app_id, user_psid, kind="fast_reply")
+        return
+
     if not has_conversation and echo_app_id != META_INBOX_APP_ID:
         _note_outreach(tenant_id, echo_app_id, user_psid)
         return

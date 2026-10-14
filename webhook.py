@@ -11,6 +11,7 @@ from flask import Blueprint, request, jsonify
 
 from bot_engine import (
     get_tenant_for_page, buffer_message, handle_echo, is_closing_reaction,
+    note_customer_message,
     download_meta_image, send_message, capture_ad_referral,
 )
 
@@ -61,6 +62,8 @@ def receive_message():
                     continue   # لا تعالج echo كرسالة عادية أبداً
 
                 sender_id    = event["sender"]["id"]
+                # توقيت رسالة العميل (من Meta) — handle_echo بيستخدمه يفرّق الرد الآلي الفوري عن الإنسان
+                note_customer_message(bundle["tenant"].id, sender_id, event.get("timestamp"))
                 user_message = event["message"].get("text", "")
                 attachments  = event["message"].get("attachments", [])
 
