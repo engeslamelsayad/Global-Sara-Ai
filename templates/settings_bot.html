@@ -77,16 +77,37 @@
     <label style="display:flex; gap:10px; align-items:flex-start; border:2px solid {{ 'var(--primary)' if _style=='assertive' else 'var(--border)' }}; border-radius:10px; padding:12px; cursor:pointer">
       <input type="radio" name="sales_style" value="assertive" {% if _style=='assertive' %}checked{% endif %} style="margin-top:3px">
       <span>
-        <b>🔥 حازم</b><br>
+        <b>🔥 حازم</b> <span style="background:#FEF3E2; color:#B45309; border-radius:6px; padding:1px 7px; font-size:11px; font-weight:700">📢 الأنسب لحملات الرسائل على Meta</span><br>
+        <span style="font-size:13px; font-weight:700; color:var(--text)">
+          لو إعلاناتك هدفها «رسائل» (Click-to-Messenger / Instagram) — اختار ده.
+        </span><br>
         <span style="font-size:13px; color:var(--text-soft)">
           كلوزر: هدفه قرار في نفس المحادثة. عميل الإعلان بياخد السعر والإغلاق من <b>أول رد</b>،
           وكل رسالة بعد السعر فيها طلب صريح. «هفكر» عنده اعتراض متخفّي مش نهاية،
           وبيحاول لحد <b>3 مرات</b> بزوايا مختلفة، والخصم (لو مفعّل في العروض) ورقته الأخيرة.
-          <b>الأنسب لإعلانات الرسائل على Meta</b> — بس نبرته ضاغطة بوضوح (من غير كدب أو ندرة مختلقة).
+          ومع كل إغلاق بيطمّن العميل بالضمانة المناسبة من سياساتك (الدفع عند الاستلام / المعاينة / الاستبدال).
+          نبرته ضاغطة بوضوح — من غير كدب أو عروض مختلقة.
         </span>
       </span>
     </label>
   </div>
+
+  <h3 style="margin-top:24px">📦 المخزون محدود؟</h3>
+  <p class="helper-text" style="margin-bottom:10px">
+    لو الكميات المتاحة عندك قليلة فعلاً، فعّل ده — البوت هيستخدمها كسبب حقيقي للاستعجال
+    (الحازم بيستخدمها في الإغلاق، والمتوازن مرة لما العميل يتردد، والهادئ بس لو اتسأل).
+    من غيرها البوت ممنوع يقول إن الكمية محدودة.
+  </p>
+  <div class="checkbox-row">
+    <input type="checkbox" name="limited_stock_enabled" id="f-limited-stock" {{ 'checked' if bc.limited_stock_enabled }}>
+    <label for="f-limited-stock">المخزون المتاح محدود فعلاً</label>
+  </div>
+  <input type="text" name="limited_stock_note" maxlength="200" value="{{ bc.limited_stock_note or '' }}"
+         placeholder="اختياري — اكتبها بكلامك: مثلاً «الكميات بتخلص بسرعة وبنجدد كل أسبوعين»"
+         style="margin-top:8px">
+  <p class="helper-text" style="margin-top:4px">
+    البوت عمره ما هيقول رقم محدد (زي «فاضل قطعتين») إلا لو انت كاتبه هنا.
+  </p>
 
   <h3 style="margin-top:24px">🧠 نموذج الرد على الزبائن</h3>
   <p class="helper-text" style="margin-bottom:12px">

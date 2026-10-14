@@ -466,6 +466,9 @@ def settings_bot():
         import sales_playbook
         _style = (request.form.get("sales_style", "") or "").strip()
         bc.sales_style = _style if _style in sales_playbook.STYLES else "balanced"
+        # ندرة حقيقية — التاجر هو اللي بيأكدها
+        bc.limited_stock_enabled = bool(request.form.get("limited_stock_enabled"))
+        bc.limited_stock_note    = _cap("limited_stock_note", 200)
         bc.use_emojis  = bool(request.form.get("use_emojis"))
 
         forbidden_words = [w.strip() for w in request.form.get("forbidden_words", "").split(",") if w.strip()]

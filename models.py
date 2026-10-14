@@ -163,6 +163,9 @@ class BotConfig(db.Model):
     max_reply_lines   = db.Column(db.Integer, default=5)
     # أسلوب البيع: calm / balanced / assertive (شوف sales_playbook.py)
     sales_style       = db.Column(db.String(20), default="balanced")
+    # ندرة حقيقية: التاجر بيأكد إن المخزون محدود فعلاً (والبوت مايخترعش ندرة من غيرها)
+    limited_stock_enabled = db.Column(db.Boolean, default=False)
+    limited_stock_note    = db.Column(db.String(200))   # صياغة التاجر — اختياري
     use_emojis        = db.Column(db.Boolean, default=True)
     forbidden_words    = db.Column(db.Text)
     # افتتاحيات ضعيفة بتقتل البيعة من أول سطر: اعتذار، نفي، تشكيك، وكشف إنها موظفة مبيعات

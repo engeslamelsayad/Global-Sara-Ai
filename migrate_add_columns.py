@@ -92,6 +92,13 @@ def run(flask_app=None):
         ok_all &= safe_alter(conn,
             "ALTER TABLE bot_configs ADD COLUMN sales_style VARCHAR(20) DEFAULT 'balanced'",
             "bot_configs.sales_style")
+        # ندرة حقيقية من التاجر (القاعدة #15 — البوت مايخترعش ندرة)
+        ok_all &= safe_alter(conn,
+            "ALTER TABLE bot_configs ADD COLUMN limited_stock_enabled BOOLEAN DEFAULT FALSE",
+            "bot_configs.limited_stock_enabled")
+        ok_all &= safe_alter(conn,
+            "ALTER TABLE bot_configs ADD COLUMN limited_stock_note VARCHAR(200)",
+            "bot_configs.limited_stock_note")
 
         print("\n=== 1ج. جدول bot_configs (العروض الديناميكية) ===")
         for col, typ in [
