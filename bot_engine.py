@@ -624,11 +624,10 @@ def build_system_prompt(bundle, matched_product=None, state=None):
                 f"ومهتم بيه. ماتسأليهوش أسئلة استكشافية عامة؛ ادخلي على القيمة والسعر والإغلاق.")
         elif state.get("stage") == "OBJECTION":
             dynamic_parts.append(sales_playbook.objection_hint(
-                getattr(bc, "sales_style", None), state.get("objections_count", 1)))
+                getattr(bc, "sales_style", None), state.get("objections_count", 1),
+                state.get("refusals_count", 0) if state.get("last_was_refusal") else 0))
         elif state.get("price_quoted"):
-            dynamic_parts.append(
-                "🧭 العميل عرف السعر خلاص — ماتعيديش السعر إلا لو سأل. ركّزي على الإغلاق: "
-                "اسألي عن التفاصيل اللي تكمّل الطلب أو اعرضي تجهيزه.")
+            dynamic_parts.append(sales_playbook.price_hint(getattr(bc, "sales_style", None)))
 
     # ── العروض الديناميكية ──
     if state and bc:
@@ -674,6 +673,28 @@ import re as _re_kw
 _SHORT_KW_LEN = 6
 # حروف عربية + لاتينية = "جوّه الكلمة"؛ أي حاجة غيرها = حد كلمة
 _AR_WORD = r"[\u0621-\u064A\u0660-\u0669a-zA-Z]"
+
+
+# رفض صريح قصير («لا» ومرادفاتها في اللهجات) — الرسالة كلها لازم تكون رفض.
+# مش keywords تاجر (مش في default_keywords.py): ده منطق محرك بيعدّ محاولات الإغلاق.
+_REFUSALS = {
+    "لا", "لاء", "لا شكرا", "لا شكرا لك", "لا مشكور", "لا مشكوره", "مشكور لا", "لا خلاص",
+    "خلاص لا", "مش عايز", "مش عايزه", "لا مش عايز", "لا مش عايزه", "مش حابب", "مش حابه",
+    "لا مش حابب", "لا مش حابه", "ما بدي", "مابدي", "لا ما بدي", "لا مابدي", "ما نبيش",
+    "مانبيش", "لا ما نبيش", "لا مانبيش", "ما نبي", "لا ما نبي", "ما ابي", "مابي", "لا ما ابي",
+    "لا مابي", "ما ابغي", "لا ما ابغي", "ما ابغى", "مش محتاج", "لا مش محتاج", "مش محتاجه",
+    "لا مش لازم", "لا ما يلزم", "ماعنديش رغبه", "no", "nope", "no thanks",
+}
+
+
+def is_refusal(message):
+    """True لو الرسالة كلها رفض صريح قصير («لا»، «لأ»، «ما نبيش»، «مش عايز»...)."""
+    import re as _re
+    t = _normalize_ar(message or "")
+    t = _re.sub(r"[^\w\s]", " ", t)          # علامات الترقيم والإيموجي
+    t = _re.sub(r"\s+", " ", t).strip()
+    t = _re.sub(r"^ل(ا)+$", "لا", t)            # «لااا»
+    return t in _REFUSALS
 
 
 def _kw_hit(kw_value, msg_lower):
@@ -801,6 +822,80 @@ def get_ai_response(bundle, sender_id, user_message, state,
             if matched_product:
                 break
 
+    # ⚠️ تحديث المرحلة (اهتمام / اعتراض / رفض) لازم يحصل **قبل** بناء البرومبت —
+    # تلميحات الرحلة وعرض إنقاذ البيعة بيقروا الـ state، ولو اتحدّث بعد الرد
+    # الموديل بيشوف حالة الرسالة اللي فاتت (كان بيعالج «غالي» متأخر رسالة).
+    # ── تحديث الـ stage ──
+    if matched_product:
+        pk = matched_product.product_key
+        if pk not in state["products_asked"]:
+            state["products_asked"].append(pk)
+        if state["stage"] in ("NEW", "INQUIRY"):
+            state["stage"] = "INTERESTED"
+    elif state["stage"] == "NEW":
+        state["stage"] = "INQUIRY"
+
+    # 🎯 "مهتم" = العميل **ردّ بعد ما سمع السعر**.
+    # ده أدق تعريف للاهتمام: اللي بيسمع السعر ويكمل كلام هو المهتم فعلاً،
+    # أما اللي بيسمع السعر ويسكت فده PRICE_SILENT (شريحة تانية خالص، وسلّم
+    # المتابعة بيتعامل معاها برسالة تطمين عن السعر مش رسالة اهتمام).
+    #
+    # ملاحظة على الترتيب: price_quoted/price_quoted_time بيتسجلوا تحت (بعد ما
+    # البوت يرد)، فلما نقراهم هنا بيكونوا من دورة سابقة — ووجود رسالة العميل
+    # الحالية دلوقتي معناه إنه ردّ بعد السعر. بنتحقق من التوقيت صراحةً عشان
+    # المنطق يفضل صح حتى لو الترتيب اتغيّر مستقبلاً.
+    if state["stage"] in ("NEW", "INQUIRY") and state.get("price_quoted"):
+        _pq_time = state.get("price_quoted_time", 0)
+        _replied_after_price = (state.get("last_message", 0) > _pq_time) if _pq_time else True
+        if _replied_after_price:
+            state["stage"] = "INTERESTED"
+            print(f"🎯 {sender_id}: INQUIRY → INTERESTED (ردّ بعد ما سمع السعر)")
+
+    # ── تتبع الاعتراضات بالنوع ولكل منتج (للتحليلات) ──
+    # 🛡️ شرط أساسي: الاعتراض ما بيحصلش من فراغ — لازم العميل يكون شاف السعر
+    # الأول (price_quoted) أو يكون في محادثة فعلية (رسالتين+).
+    # من غير الشرط ده، أي حد بيفتح المحادثة بكلمة زي "خصم" (والإعلانات نفسها
+    # بتقول "بعد الخصم"!) كان بيتسجّل معترض من أول رسالة — وده كان بيلوّث
+    # التحليلات وبيخلي سلّم المتابعة يبعتله رسالة إنقاذ سعر من غير أي داعي.
+    _can_object = bool(state.get("price_quoted")) or state.get("messages_count", 0) >= 2
+
+    _obj_types = []
+    _obj_words = []
+    if _can_object:
+        for _cat, _tag in (("objection_expensive", "expensive"),
+                           ("objection_unsure", "unsure"),
+                           ("objection_later", "later")):
+            _w = matched_keyword(user_message, keywords, _cat)
+            if _w:
+                _obj_types.append(_tag)
+                _obj_words.append(f"{_tag}:«{_w}»")
+
+    if _obj_types:
+        print(f"⚠️ Objection detected for {sender_id}: {', '.join(_obj_words)}")
+        state["stage"] = "OBJECTION"
+        state["objections_count"] = state.get("objections_count", 0) + 1
+        # ننسب الاعتراض للمنتج الحالي (المطابق أو آخر منتج اتسأل عنه)
+        _pk = None
+        if matched_product:
+            _pk = matched_product.product_key
+        elif state.get("products_asked"):
+            _pk = state["products_asked"][-1]
+        if _pk:
+            _obp = state.setdefault("objections_by_product", {})
+            _rec = _obp.setdefault(_pk, {})
+            for _t in _obj_types:
+                _rec[_t] = _rec.get(_t, 0) + 1
+
+    # ── رفض صريح («لا») بعد السعر: مش keyword اعتراض، بس لازم يتعدّ ──
+    # من غيره المرحلة بتفضل INTERESTED والبوت بيودّع العميل من أول «لا» حتى في الحازم.
+    state["last_was_refusal"] = False
+    if not _obj_types and state.get("price_quoted") and is_refusal(user_message):
+        state["last_was_refusal"] = True
+        state["refusals_count"] = state.get("refusals_count", 0) + 1
+        state["stage"] = "OBJECTION"
+        state["objections_count"] = state.get("objections_count", 0) + 1
+        print(f"🙅 Refusal #{state['refusals_count']} from {sender_id}")
+
     system_blocks   = build_system_prompt(bundle, matched_product, state)
 
     history = state.get("history", [])
@@ -862,67 +957,6 @@ def get_ai_response(bundle, sender_id, user_message, state,
             }
             state["has_order"] = True
             state["stage"] = "ORDERED"
-
-    # ── تحديث الـ stage ──
-    if matched_product:
-        pk = matched_product.product_key
-        if pk not in state["products_asked"]:
-            state["products_asked"].append(pk)
-        if state["stage"] in ("NEW", "INQUIRY"):
-            state["stage"] = "INTERESTED"
-    elif state["stage"] == "NEW":
-        state["stage"] = "INQUIRY"
-
-    # 🎯 "مهتم" = العميل **ردّ بعد ما سمع السعر**.
-    # ده أدق تعريف للاهتمام: اللي بيسمع السعر ويكمل كلام هو المهتم فعلاً،
-    # أما اللي بيسمع السعر ويسكت فده PRICE_SILENT (شريحة تانية خالص، وسلّم
-    # المتابعة بيتعامل معاها برسالة تطمين عن السعر مش رسالة اهتمام).
-    #
-    # ملاحظة على الترتيب: price_quoted/price_quoted_time بيتسجلوا تحت (بعد ما
-    # البوت يرد)، فلما نقراهم هنا بيكونوا من دورة سابقة — ووجود رسالة العميل
-    # الحالية دلوقتي معناه إنه ردّ بعد السعر. بنتحقق من التوقيت صراحةً عشان
-    # المنطق يفضل صح حتى لو الترتيب اتغيّر مستقبلاً.
-    if state["stage"] in ("NEW", "INQUIRY") and state.get("price_quoted"):
-        _pq_time = state.get("price_quoted_time", 0)
-        _replied_after_price = (state.get("last_message", 0) > _pq_time) if _pq_time else True
-        if _replied_after_price:
-            state["stage"] = "INTERESTED"
-            print(f"🎯 {sender_id}: INQUIRY → INTERESTED (ردّ بعد ما سمع السعر)")
-
-    # ── تتبع الاعتراضات بالنوع ولكل منتج (للتحليلات) ──
-    # 🛡️ شرط أساسي: الاعتراض ما بيحصلش من فراغ — لازم العميل يكون شاف السعر
-    # الأول (price_quoted) أو يكون في محادثة فعلية (رسالتين+).
-    # من غير الشرط ده، أي حد بيفتح المحادثة بكلمة زي "خصم" (والإعلانات نفسها
-    # بتقول "بعد الخصم"!) كان بيتسجّل معترض من أول رسالة — وده كان بيلوّث
-    # التحليلات وبيخلي سلّم المتابعة يبعتله رسالة إنقاذ سعر من غير أي داعي.
-    _can_object = bool(state.get("price_quoted")) or state.get("messages_count", 0) >= 2
-
-    _obj_types = []
-    _obj_words = []
-    if _can_object:
-        for _cat, _tag in (("objection_expensive", "expensive"),
-                           ("objection_unsure", "unsure"),
-                           ("objection_later", "later")):
-            _w = matched_keyword(user_message, keywords, _cat)
-            if _w:
-                _obj_types.append(_tag)
-                _obj_words.append(f"{_tag}:«{_w}»")
-
-    if _obj_types:
-        print(f"⚠️ Objection detected for {sender_id}: {', '.join(_obj_words)}")
-        state["stage"] = "OBJECTION"
-        state["objections_count"] = state.get("objections_count", 0) + 1
-        # ننسب الاعتراض للمنتج الحالي (المطابق أو آخر منتج اتسأل عنه)
-        _pk = None
-        if matched_product:
-            _pk = matched_product.product_key
-        elif state.get("products_asked"):
-            _pk = state["products_asked"][-1]
-        if _pk:
-            _obp = state.setdefault("objections_by_product", {})
-            _rec = _obp.setdefault(_pk, {})
-            for _t in _obj_types:
-                _rec[_t] = _rec.get(_t, 0) + 1
 
     # العروض الديناميكية: لو الشروط تحققت في الرد ده، نعلّم إن العرض اتقدّم
     # (عشان مايتكررش في كل رسالة)
