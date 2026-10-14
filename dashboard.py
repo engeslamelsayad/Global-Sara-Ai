@@ -557,6 +557,35 @@ def _ai_request_overrides(tenant):
     return dialect, style
 
 
+@dashboard_bp.route("/settings/general/google-sheet-script")
+@login_required_dashboard
+def google_sheet_script():
+    """
+    كود Google Apps Script جاهز للتحميل — بيستقبل طلبات البوت في Google Sheet.
+    بيتجهّز لكل tenant (اسمه + منتج وسعر حقيقيين في دالة الاختبار)، والأعمدة A–H ثابتة
+    ومطابقة لـ push_to_google_sheet في bot_engine.py — لو غيّرت الـ payload هناك عدّل القالب.
+    """
+    from flask import Response
+    from bot_engine import _display_price
+    import json as _js
+    # JSON string literal صالح في JS، والعربي مقروء (tojson كان بيحوّله لـ \uXXXX)
+    js = lambda v: _js.dumps(v, ensure_ascii=False).replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
+    tenant = _current_tenant()
+    product = Product.query.filter_by(tenant_id=tenant.id, is_active=True).first()
+    currency = tenant.currency or "جنيه"
+    body = render_template(
+        "google_sheet_orders.gs",
+        # "*/" كان هيقفل التعليق اللي في أول الملف بدري
+        business_name=(tenant.business_name or "متجري").replace("*/", "* /"),
+        sample_product=js(product.name if product else "منتج تجريبي"),
+        sample_price=js((_display_price(product, currency) if product else "") or f"100 {currency}"),
+        business_js=js(tenant.business_name or "متجري"),
+    )
+    slug = "".join(ch for ch in (tenant.slug or "store") if ch.isalnum() or ch in "-_") or "store"
+    return Response(body, mimetype="text/plain; charset=utf-8", headers={
+        "Content-Disposition": f'attachment; filename="sara-orders-{slug}.gs"'})
+
+
 @dashboard_bp.route("/settings/bot/ai-suggest-objections", methods=["POST"])
 @login_required_dashboard
 def ai_suggest_objections():

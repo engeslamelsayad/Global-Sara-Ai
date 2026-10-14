@@ -29,6 +29,22 @@
   <input type="url" name="google_sheet_url" placeholder="https://script.google.com/macros/s/..."
          value="{{ tenant.google_sheet_url or '' }}">
   <p class="helper-text">كل طلب يتسجل من البوت هيتبعت تلقائياً لنفس الشيت ده، بالإضافة لتسجيله في النظام.</p>
+  <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:6px 0 4px">
+    <a class="btn btn-secondary btn-sm" href="{{ url_for('dashboard.google_sheet_script') }}">⬇️ حمّل كود Google Sheet</a>
+    <span class="helper-text" style="margin:0">مش معاك رابط؟ الكود ده بيطلّعهولك في 3 دقايق.</span>
+  </div>
+  <details style="margin-bottom:12px; font-size:13px; line-height:1.9">
+    <summary style="cursor:pointer; color:var(--primary-dark); font-weight:700">إزاي أطلّع الرابط؟</summary>
+    <ol style="margin:8px 0 0; padding-inline-start:20px">
+      <li>افتح Google Sheet جديد ← <b>Extensions (الإضافات)</b> ← <b>Apps Script</b>.</li>
+      <li>امسح أي كود موجود، والزق الكود اللي حمّلته، ودوس 💾 Save.</li>
+      <li><b>Deploy</b> ← <b>New deployment</b> ← النوع <b>Web app</b>، وخلي:
+        Execute as = <b>Me</b>، و Who has access = <b>Anyone</b>، ودوس Deploy ووافق على الصلاحيات.</li>
+      <li>انسخ الـ <b>Web app URL</b> والزقه في الخانة اللي فوق، ودوس «حفظ التعديلات».</li>
+    </ol>
+    <p class="helper-text" style="margin-top:6px">جوه الكود فيه دالة <code>testAppend</code> تجرّب بيها الشيت قبل ما تربطه.
+      الأعمدة: التاريخ، الاسم، الموبايل، العنوان، المنتج، الصفحة، الخصم، السعر.</p>
+  </details>
 
   <div class="form-actions">
     <button class="btn btn-primary" type="submit">حفظ التعديلات</button>
