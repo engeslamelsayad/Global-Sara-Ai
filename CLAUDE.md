@@ -1,0 +1,242 @@
+# CLAUDE.md — Global Sara AI
+
+> الملف ده بيتقري تلقائياً من Claude Code في بداية كل جلسة. حطه في **جذر الريبو** (جنب `app_main.py`).
+> آخر تحديث: 14 أكتوبر 2026 — آخر commit متراجَع: `c291f94` (+ تحسينات البيع في الـ PR اللي بعده).
+>
+> 📌 **قاعدة دايمة: أي تعديل في الكود لازم يتحدّث معاه الملف ده في نفس الـ PR** (خريطة الملفات، القواعد، حالة المشروع، وسطر "آخر تحديث"). PR من غير تحديث هنا = ناقص.
+
+---
+
+## 1. المشروع في سطرين
+
+**Global Sara AI** = منصة SaaS متعددة العملاء (multi-tenant) لبوت مبيعات AI بالعربي بيرد على عملاء **Facebook Messenger + Instagram DM**، بياخد الأوردرات، بيعالج الاعتراضات، وبيتابع العملاء اللي ماشتروش.
+
+- **المالك والمطوّر:** إسلام (Eslam). بيتكلم مصري، عايز ردود مباشرة وعملية من غير شرح زيادة.
+- **الريبو:** `github.com/engeslamelsayad/Global-Sara-Ai` (branch: `main`)
+- **الاستضافة:** Railway — أي push على `main` = deploy على عملاء حقيقيين بيدفعوا فلوس. **اتعامل مع `main` كـ production.**
+- **العملاء الحاليين (tenants):**
+  - **آمان ستور (Aman Store)** — موبيليا وسجاد، لهجة **شامي**، أسلوب بيع **assertive**. ده عميل الاختبار الأساسي.
+  - **EECM** — منتجات طبية (براندات YulaRay و Junara)، لهجة مصري. اتنقل للـ v2 عن طريق `migrate_eecm.py`، وفيه كمان **نسخة legacy single-tenant قديمة** (`app.py` + `rag.py`) مش جوه الريبو ده.
+
+---
+
+## 2. الـ Stack
+
+| الجزء | التقنية |
+|---|---|
+| Backend | Python + Flask (blueprints) |
+| DB | PostgreSQL على Railway (`DATABASE_URL`) — fallback تلقائي لـ SQLite محلياً |
+| ORM | Flask-SQLAlchemy (`models.py`) |
+| حالة المحادثات | Redis (`REDIS_URL`) مع fallback لذاكرة محلية |
+| AI | Anthropic Claude **جيل 5.5** — **Haiku 5.5 افتراضي** للرد على العملاء، Sonnet 5.5 للتحليل العميق (sales coach)، Opus 5.5 اختياري. القائمة والأسعار في `model_catalog.py` |
+| Auth | Flask-Login |
+| تكاملات | Meta Graph API (رسائل + labels + ad referrals)، Google Sheets (webhook للأوردرات)، Telegram (تقارير)، OpenAI (تفريغ الفويس فقط) |
+| التشغيل | `Procfile`: `web: python app_main.py` — **process واحد**. Python **3.12** (`.python-version`) |
+| Postgres driver | `psycopg2-binary` — الـ URL بيتحوّل لـ `postgresql+psycopg2://` في `db_init.py` (شوف القاعدة #14) |
+
+---
+
+## 3. خريطة الملفات
+
+### نقطة الدخول والبنية
+- `app_main.py` — بيجمع كل حاجة: DB → **auto-migrations** → login → blueprints → scheduler.
+- `db_init.py` — اتصال الـ DB + `db.create_all()`.
+- `models.py` — كل الجداول: `Tenant, User, Page, BotConfig, Keyword, BotAppId, FollowupStage, SalaryCampaign, Product, Policy, Order, SmartRule, MetaLabel`.
+- `migrate_add_columns.py` — **المصدر الوحيد لتغييرات الـ schema** (شوف القاعدة #1).
+
+### قلب البوت
+- `webhook.py` — `/webhook` (GET verify + POST). بيوجّه كل event للـ tenant حسب `page_id`، بيفصل: referral / echo / stickers / رسايل عادية.
+- `bot_engine.py` (~89KB — **أخطر ملف**) — فيه:
+  - state (Redis + memory fallback)، tenant cache (60 ثانية)
+  - `build_system_prompt` — بناء البرومبت الكامل
+  - keyword matching (`_kw_hit` مع word boundary للكلمات القصيرة)
+  - `get_ai_response` → استدعاء Claude (مع **منتج السياق**: لو الرسالة مافيهاش اسم منتج بيرجع لآخر منتج اتكلم عنه العميل أو منتج الإعلان)
+  - `_handle_ai_failure` → لو Claude فشل: رسالة انتظار للعميل + تنبيه تليجرام (القاعدة #11)
+  - `_display_price` → السعر بعملة الـ tenant (للبرومبت وللـ upsell)
+  - parsing لعلامات `[ORDER|...]` و `[LABEL|...]`
+  - حساب السعر، حفظ الأوردر، Google Sheet، الإرسال لـ Meta
+  - **debounce** (`buffer_message` / `_debounce_fire`) — بيجمّع رسايل العميل قبل الرد
+  - **echo detection + auto-trust** (`handle_echo`, `AUTO_TRUST_THRESHOLD = 3`)
+- `sales_playbook.py` — أساليب البيع الـ 3 (calm / balanced / assertive).
+- `dialect_text.py` — **المصدر الوحيد لكل نص بيوصل العميل** عن طريق `get_msg()`. حزم كاملة لـ 5 لهجات: مصري / شامي / خليجي / **ليبي** / فصحى (العراقي والمغربي بيستخدموا حزمة الفصحى لحد ما تتكتبلهم حزمة).
+- `default_keywords.py` — الكلمات المفتاحية الافتراضية + مراحل المتابعة الافتراضية (6h / 24h / 24h+خصم / 48h+خصم).
+
+### المهام الخلفية
+- `scheduler.py` — thread واحد بيلف كل 60 ثانية: followups (`recovery.py`)، حملة المرتبات، sales coach، تقارير تليجرام الأسبوعية. يتقفل بـ `DISABLE_SCHEDULER=1`.
+- `recovery.py` — متابعة ذكية حسب سبب توقف العميل (OBJECTION / INTERESTED / INQUIRY).
+- `salary_campaign.py` — خصومات أيام المرتبات (25 و 1 افتراضياً) مع rate limiting + circuit breaker.
+- `sales_coach.py` + `ai_assist.py` — تقرير مدرّب المبيعات: طبقة إحصائية مجانية على 100% من المحادثات + عينة AI طبقية (لحد 120 محادثة) + ذاكرة بين التقارير.
+- `telegram_bot.py` — ربط التاجر بكود `LINK-XXXX` وإرسال التقارير.
+
+### الداشبورد والأدوات
+- `dashboard.py` (prefix `/dashboard`) + `templates/*.html` — منتجات، إعدادات البوت، keywords، followups، labels، smart rules، حملة المرتبات، تليجرام، **handoffs** (المحادثات الموقوفة)، أوردرات.
+- `analytics.py` — `/analytics/<tenant_slug>`.
+- `ai_assist.py` — اقتراحات AI للداشبورد (persona، اعتراضات، وصف منتج، keywords).
+- `store_importer.py` — استيراد منتجات من رابط متجر (Shopify API أولاً، وإلا scraping + AI).
+- `model_catalog.py` — الموديلات المتاحة وتقدير تكلفتها، و**`request_kwargs()` + `response_text()`** اللي لازم أي استدعاء لـ Claude يعدّي عليهم (شوف القاعدة #13)، و`LEGACY_UPGRADES` لترقية أسماء الموديلات القديمة.
+- `demo.py` (prefix `/demo`) — شات ديمو عام بنفس المحرك الحقيقي (15 رسالة/جلسة).
+- سكربتات تشغيل يدوي: `create_tenant.py`, `create_user.py`, `migrate_eecm.py`.
+
+---
+
+## 4. 🔴 القواعد الذهبية — اللي لو اتكسرت المشروع يضرب
+
+1. **أي تغيير في الـ schema = يتضاف في `migrate_add_columns.py`** عن طريق `safe_alter(...)`.
+   - `db.create_all()` بيعمل جداول جديدة بس — **مش بيضيف أعمدة لجداول موجودة**.
+   - لو ضفت عمود في `models.py` من غير ALTER → الداشبورد هيقع على production فوراً.
+   - كل أمر لازم يكون idempotent (يتجاهل "already exists")، وكل أمر في transaction لوحده.
+   - ممنوع تماماً تطلب من إسلام يدخل يعدّل PostgreSQL بإيده.
+   - الأعمدة الجديدة لازم يكون ليها `DEFAULT` أو تقبل `NULL` عشان الصفوف القديمة.
+
+2. **أي keyword أو مرحلة متابعة افتراضية = في `default_keywords.py` بس.** الملف ده بيستخدمه `create_tenant.py` و `migrate_eecm.py` والـ backfill. ماتكررش القيم في أماكن تانية.
+
+3. **أي نص بيوصل العميل مباشرة (مش عن طريق الـ AI) = في `dialect_text.py`** بكل حزم اللهجات (egypt / levant / gulf / libya / msa). ممنوع نص مصري hardcoded في الكود — كان بيتسرب لعملاء آمان (شامي).
+   - كل الحزم لازم يكون فيها **نفس المفاتيح بالظبط** — مفتاح ناقص بيرجع للمصري في صمت.
+   - لهجة جديدة = عيلة في `_FAMILY_MAP` + `VOCAB` + حزمة `MESSAGES` + `<option>` في `templates/settings_bot.html`.
+   - وخلي بالك: **الأمثلة جوه البرومبت أقوى من التعليمات** — مثال مصري في البرومبت بيخلي الموديل يرد مصري حتى لو اللهجة شامي. الأمثلة تتكتب **موصوفة بالمعنى** ("العميل سأل عن السعر") مش بجمل عميل حرفية ("بكام؟").
+
+4. **عقد العلامات بين البرومبت والـ parser:** `[ORDER|...]` و `[LABEL|...]` بيتقروا بـ regex في `bot_engine.py` (`ORDER_PATTERN`, `LABEL_PATTERN`). لو غيّرت الصيغة في البرومبت لازم تغيّر الـ regex في نفس الـ commit والعكس — وإلا الأوردرات هتضيع في صمت.
+
+5. **Keyword matching:** الكلمات القصيرة (≤ 6 حروف) لازم word-boundary (`_kw_hit`). substring matching بيعمل false positives بتحوّل عملاء بيشتروا للموظف أو للاعتراضات.
+   - كشف الاعتراض لازم يكون **بعد ما السعر يتعرض** للعميل.
+   - كلمة "خصم" **متشالة عمداً** من objection keywords لأنها موجودة في نص الإعلانات. ماترجعهاش.
+
+6. **Echo / self-pause:** Meta بيبعت رسايل البوت نفسه كـ echo events. `handle_echo` لازم يميّز:
+   - رسالة البوت نفسه (من الـ history + `BotAppId` المسجل تلقائياً) → **تجاهل**.
+   - أداة آلية بتراسل عملاء جداد مالهمش محادثة (outreach) → ماتوقفش البوت، وبعد 3 عملاء مختلفين → trust تلقائي.
+   - موديريتور بشري بيرد جوه محادثة شغالة → **البوت يتوقف** للمحادثة دي.
+   - أي تعديل هنا ممكن يرجّع bug إن البوت بيكتم نفسه بعد أول رسالة. اختبر السيناريوهات التلاتة.
+
+7. **max_tokens:** لو الرد اتقطع، JSON بيبوظ والميزة بتفشل في صمت. سيب هامش (مثلاً 4000 لتحليل الوصف). `_ask_json` بيطبع تحذير لو `stop_reason == "max_tokens"` — ماتشيلوش.
+
+8. **Process واحد بس.** الـ debounce timers (`pending_messages`) والـ scheduler thread عايشين في الذاكرة.
+   - ماتحوّلش لـ gunicorn بأكتر من worker من غير ما تحل: (أ) الـ scheduler هيشتغل مرتين = رسايل متابعة مكررة للعملاء، (ب) الـ debounce هيتقسم بين الـ workers.
+   - أي عمل تقيل (حملات، rate limiting بـ sleep) يتعمل في thread منفصل — مايعطلش حلقة الـ scheduler.
+   - أي thread بيلمس الـ DB محتاج `app.app_context()`.
+
+9. **ماتكسرش الـ webhook.** لازم دايماً يرجّع `200` لـ Meta بسرعة، وإلا Meta بيعيد الإرسال أو بيوقف الـ webhook. أي exception جوه معالجة event لازم يتمسك.
+
+10. **Multi-tenant isolation:** كل query في الداشبورد لازم تتفلتر بـ `tenant_id` بتاع `current_user`. كل مفتاح Redis بصيغة `conv:{tenant_id}:{sender_id}`. ماتعملش cache أو global مشترك بين tenants.
+
+11. **فشل Claude (رصيد / مفتاح / outage / رفض):** حصل incident إن الرصيد خلص والرسايل اتبلعت في صمت. دلوقتي `do_process_message` بيلف `get_ai_response` في try، والفشل بيروح لـ `_handle_ai_failure`:
+    - العميل ياخد رسالة انتظار بلهجته (`ai_down`) — مرة كل ساعة بالكتير، وبتتحفظ في التاريخ كـ assistant عشان الـ echo بتاعها مايوقفش البوت.
+    - التاجر ياخد تنبيه تليجرام بالسبب (credit / auth / transient / empty) — مرة كل 10 دقايق لكل tenant.
+    - البوت **مابيتحطش** في handoff — بيكمّل لوحده أول ما Claude يرجع.
+    - رد فاضي أو `stop_reason == "refusal"` = فشل، **ممنوع** يتبعت للعميل رسالة فاضية. ماتشيلش أي جزء من ده.
+
+12. **تكلفة الـ AI:** الميزات التحليلية بتعتمد على إحصاء مجاني + sampling. ماتبعتش كل المحادثات للـ AI. وحافظ على prompt caching في البرومبت الرئيسي (أغلبه مكاشّ) — أي حاجة بتتغير لكل رسالة/عميل تتحط في الـ dynamic block مش الـ static.
+
+13. **استدعاء Claude = `model_catalog` دايماً.** جيل 5.5 بيفكّر افتراضياً والتفكير بيتحسب من `max_tokens`، والـ tokenizer بيعدّ ~30% أكتر:
+    - مرّر `**model_catalog.request_kwargs(model, max_tokens, think=...)` — بيقفل التفكير لردود العملاء (Haiku `disabled` / Sonnet `between_tools` — الـ `disabled` بيرجّع 400 على Sonnet 5.5)، وOpus 5.5 مابيتقفلش فبياخد effort low + هامش، وبيضرب `max_tokens` في 1.3.
+    - اقرا الرد بـ `model_catalog.response_text(resp)` — **ممنوع `content[0].text`** (الرد ممكن يبدأ بـ thinking block).
+    - ممنوع `temperature`/`top_p`/`top_k` وممنوع assistant prefill — بيرجّعوا 400 على جيل 5.5.
+    - موديل جديد = يتضاف في `MODELS` + `request_kwargs` + (لو بيستبدل قديم) `LEGACY_UPGRADES` عشان الـ migration يرقّي الحسابات.
+
+14. **ثبّت اللي ممكن يكسر الإقلاع.** الـ requirements أغلبها مش متثبتة، وأي build جديد بيسحب أحدث نسخة: SQLAlchemy 2.1 غيّر الـ Postgres driver الافتراضي لـ psycopg v3 ووقّع production (crash loop). لو ضفت/غيّرت dependency: ثبّت حد أدنى، وجرّب الـ smoke test على Python 3.12 بـ venv نضيفة (`pip install -r requirements.txt` من الصفر) — مش على بيئة متسطّبة من قبل.
+
+---
+
+## 5. طريقة الشغل (Workflow)
+
+### قبل أي تعديل
+```bash
+git pull origin main
+git checkout -b feat/<اسم-قصير>   # ماتشتغلش على main مباشرة
+```
+
+### اختبار محلي سريع (اتجرب وشغال)
+بيقوم التطبيق على SQLite من غير Postgres ولا Redis، وبيشغّل الـ migrations، وبيتأكد إن الصفحات الأساسية شغالة:
+```bash
+pip install -r requirements.txt
+DISABLE_SCHEDULER=1 ANTHROPIC_API_KEY=x python -c "
+import app_main
+c = app_main.app.test_client()
+assert c.get('/login').status_code == 200
+assert c.get('/webhook?hub.mode=subscribe&hub.verify_token=mytoken123&hub.challenge=ok').status_code == 200
+assert c.get('/dashboard/').status_code in (200, 302)
+print('✅ smoke OK')
+"
+rm -f local_dev.db instance/local_dev.db
+```
+وكمان فحص syntax لكل الملفات:
+```bash
+python -m py_compile *.py && echo "✅ syntax OK"
+```
+> ⚠️ الـ smoke test ده على SQLite — مابيكشفش مشاكل الـ Postgres driver. لو لمست `db_init.py` أو الـ requirements، اتأكد كمان إن `create_engine` بيقوم بـ URL Postgres وهمي (يفشل في الاتصال بس، مش في الـ import).
+> مفيش test suite حالياً. لو بتعدّل منطق حساس (keywords، echo، order parsing، السعر) اكتب اختبار صغير بـ `pytest` للدالة دي بالذات.
+
+### بعد التعديل
+- **حدّث الـ CLAUDE.md ده في نفس الـ PR** (القاعدة الدايمة فوق).
+- اعمل **PR** لـ `main` — مش push مباشر. (العملاء بيعملوا أوردرات حقيقية.)
+- في وصف الـ PR: إيه اتغير، ليه، وإيه اللي محتاج migration أو env var جديد.
+- بعد الـ merge، Railway بيعمل deploy تلقائي، والـ migrations بتشتغل لوحدها عند الإقلاع. راجع logs Railway وابحث عن `❌` في مخرجات الـ migration.
+
+### Checklist قبل الـ PR
+- [ ] عمود جديد؟ → متضاف في `migrate_add_columns.py`
+- [ ] نص جديد للعميل؟ → في `dialect_text.py` بكل الحزم (نفس المفاتيح)
+- [ ] استدعاء Claude جديد؟ → `request_kwargs` + `response_text`
+- [ ] dependency جديدة؟ → متثبتة + smoke test على venv نضيفة
+- [ ] الـ CLAUDE.md اتحدّث؟
+- [ ] keyword/مرحلة افتراضية؟ → في `default_keywords.py`
+- [ ] غيّرت صيغة علامة في البرومبت؟ → الـ regex متعدّل
+- [ ] كل queries الداشبورد متفلترة بـ tenant
+- [ ] الـ smoke test عدّى
+- [ ] UI الداشبورد: AJAX مش page reload (تفضيل إسلام)
+- [ ] محتاج نفس التعديل في نسخة EECM القديمة؟ → اذكرها في الـ PR
+
+---
+
+## 6. متغيرات البيئة
+
+| المتغير | الاستخدام |
+|---|---|
+| `DATABASE_URL` | Postgres (Railway). من غيره → SQLite محلي |
+| `REDIS_URL` | حالة المحادثات. من غيره → ذاكرة (بتضيع مع الـ restart) |
+| `ANTHROPIC_API_KEY` | Claude |
+| `META_VERIFY_TOKEN` | تحقق webhook (الافتراضي `mytoken123`) |
+| `FLASK_SECRET_KEY` | sessions |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME` | التقارير |
+| `OPENAI_API_KEY` | تفريغ الرسايل الصوتية |
+| `DEMO_TENANT_SLUG` | tenant صفحة الديمو (افتراضي `eecm`) |
+| `DISABLE_SCHEDULER` | يقفل المهام الخلفية (للاختبار المحلي) |
+| `ANALYTICS_KEY` | وصول التحليلات |
+
+**ممنوع** تحط أي token أو مفتاح في الكود أو تعمله commit. توكنات صفحات Meta متخزنة في جدول `Page` في الـ DB.
+
+---
+
+## 7. حالة المشروع (لحد أكتوبر 2026)
+
+### اتعمل وشغال
+- Sales playbook (3 أساليب) — assertive مفعّل لآمان.
+- Sales coach بتقارير مجدولة، 3 مستويات عمق، اختيار Haiku/Sonnet.
+- نظام اللهجات (4 عائلات) بدل المصري الـ hardcoded.
+- إصلاح bug البوت اللي بيوقف نفسه (self-echo) + auto-trust + تسجيل app_id تلقائي.
+- داشبورد المحادثات الموقوفة (`handoffs.html`): السبب، الوقت، تجميع حسب التطبيق، trust/release بضغطة.
+- اختيار العملة (7 عملات) على مستوى الـ tenant.
+- سلم المتابعة (4 مراحل) + زرار استرجاع الافتراضي.
+- حملة يوم المرتبات.
+- إصلاح `KeyError` في `capture_ad_referral` لأول رسالة من إعلان.
+- استيراد منتجات من رابط متجر، custom Meta labels، smart rules، صفحة ديمو.
+
+- **أكتوبر 2026:**
+  - النصوص المصرية اللي كانت بتتسرب (رد الفويس، الـ upsell، رسالة حملة المرتبات الافتراضية) اتنقلت لـ `dialect_text.py`.
+  - معالجة فشل Claude (القاعدة #11) — رسالة انتظار + تنبيه تليجرام.
+  - اللهجة الليبي (حزمة كاملة) — ⚠️ النصوص محتاجة مراجعة من متحدث ليبي.
+  - الترقية لجيل 5.5 (Haiku/Sonnet/Opus) + ترقية تلقائية للحسابات في الـ migration (خطوة 9ب).
+  - Hotfix: crash loop في production بسبب SQLAlchemy 2.1 + psycopg (القاعدة #14).
+  - تقوية البيع: منتج السياق (البوت مابيتوهش لما العميل يقول "تمام"/"اطلبه")، العملة الصح في البرومبت، أمثلة محايدة اللهجة، تلميح "العميل فين في الرحلة" (إعلان / اعتراض / عرف السعر)، طلب كل البيانات في رسالة واحدة + تأكيد الطلب، وشيل "أكدي محدودية الكمية" (ندرة مختلقة).
+
+### في الأفق
+- مزامنة نسخة EECM القديمة مع v2 مع نضوج الميزات (أو قفل القديمة نهائياً).
+- إضافة test suite أساسي للمنطق الحساس (فيه سكربتات سيناريو بـ Claude وهمي اتكتبت أثناء التطوير — تستاهل تتحول لـ `tests/` بـ pytest).
+- البرومبت بيقول للبوت يدّعي إنه "موظفة حقيقية" لو اتسأل "انتي روبوت؟" — قرار محتاج مراجعة (ثقة العملاء + سياسات Meta).
+
+---
+
+## 8. أسلوب التعامل مع إسلام
+
+- رد بالمصري، مختصر، ومباشر. ابدأ بالحل.
+- لما تسلّم تعديل: قول الملفات اللي اتغيرت، وهل محتاج migration أو env var جديد، وإزاي يتأكد إنه اشتغل.
+- لو التعديل فيه مخاطرة على العملاء الحاليين (آمان / EECM) — قولها صراحة قبل ما تنفّذ.
+- المشاكل غالباً بتيجي من logs Railway أو screenshots من المحادثات — اشتغل من الدليل الفعلي، مش من التخمين.
