@@ -287,6 +287,13 @@ def run(flask_app=None):
             from models import BotConfig
             from model_catalog import LEGACY_UPGRADES as UPGRADES
             upgraded = 0
+            # تشخيص: كل موديل متخزن وعدد الحسابات عليه — عشان نشوف في الـ logs
+            # لو فيه قيمة غريبة مش في LEGACY_UPGRADES ومابتترقّاش
+            _in_use = {}
+            for bc in BotConfig.query.all():
+                _k = (bc.model_name or "").strip() or "(فاضي)"
+                _in_use[_k] = _in_use.get(_k, 0) + 1
+            print(f"  ℹ️ الموديلات المستخدمة: {_in_use}")
             for bc in BotConfig.query.all():
                 cur = (bc.model_name or "").strip()
                 if cur in UPGRADES:

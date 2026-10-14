@@ -177,6 +177,12 @@
     <span class="nav-icon">🔗</span> الصفحات المربوطة
   </a>
 
+  {% if is_super_admin %}
+  <a class="nav-link {{ 'active' if request.endpoint=='admin.users_page' }}" href="{{ url_for('admin.users_page') }}" style="margin-top:14px">
+    <span class="nav-icon">🛠</span> إدارة المستخدمين
+  </a>
+  {% endif %}
+
   <a class="logout-link {{ 'active' if request.endpoint=='dashboard.profile' }}" href="{{ url_for('dashboard.profile') }}" style="color:var(--text-soft)">⚙ الإعدادات الشخصية</a>
   <a class="logout-link" href="{{ url_for('auth.logout') }}">↩ تسجيل الخروج</a>
 </nav>

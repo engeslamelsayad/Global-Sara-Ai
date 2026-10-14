@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+{% block title %}إدارة المستخدمين{% endblock %}
+{% block content %}
+<style>
+  .adm-table-wrap{overflow-x:auto}
+  .adm-table{width:100%; border-collapse:collapse; font-size:14px; min-width:760px; table-layout:fixed}
+  .adm-table th{font-size:12px; color:var(--text-soft); text-align:right; padding:8px 6px; border-bottom:1px solid var(--border)}
+  .adm-table td{padding:8px 6px; border-bottom:1px solid var(--border); vertical-align:middle}
+  .adm-table input,.adm-table select{width:100%; padding:6px 8px; border:1px solid var(--border); border-radius:8px; font:inherit; font-size:13px; background:#fff}
+  .adm-table tr.dirty td{background:var(--warn-bg)}
+  .adm-actions{display:flex; gap:6px; flex-wrap:nowrap}
+  .adm-actions .btn{white-space:nowrap; padding:6px 10px}
+  .adm-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; margin-bottom:12px}
+  .adm-grid label{display:block; font-size:13px; font-weight:700; margin-bottom:4px}
+  .adm-grid input,.adm-grid select{width:100%; padding:9px 10px; border:1px solid var(--border); border-radius:8px; font:inherit; box-sizing:border-box}
+  .adm-hint{font-size:12px; color:var(--text-soft); margin-top:4px}
+  .pw-box{display:none; margin-top:12px; padding:12px 14px; border-radius:10px; background:var(--success-bg); border:1px solid #BBE5C8; font-size:14px}
+  .pw-box.show{display:block}
+  .pw-box code{font-size:16px; font-weight:700; direction:ltr; display:inline-block; padding:2px 8px; background:#fff; border-radius:6px; margin:0 6px}
+  .adm-msg{font-size:13px; margin-top:8px; min-height:18px}
+  .adm-msg.err{color:var(--danger)} .adm-msg.ok{color:var(--success)}
+  .adm-search{width:100%; max-width:320px; padding:8px 10px; border:1px solid var(--border); border-radius:8px; font:inherit; margin-bottom:10px}
+</style>
+
+<div class="page-header">
+  <h1 class="page-title">🛠 إدارة المستخدمين</h1>
+  <p class="page-sub">كل حسابات الدخول للداشبورد في كل الشركات — إضافة وتعديل وحذف من هنا بدل سكربتات Railway.</p>
+</div>
+
+<!-- ═══ الباسورد الجديد (بيظهر مرة واحدة) ═══ -->
+<div class="pw-box" id="pw-box">
+  🔑 باسورد <b id="pw-for"></b>:
+  <code id="pw-value"></code>
+  <button class="btn btn-secondary btn-sm" type="button" onclick="copyPw()">نسخ</button>
+  <div class="adm-hint">الباسورد بيظهر هنا مرة واحدة بس — انسخه وابعته لصاحب الحساب.</div>
+</div>
+
+<!-- ═══ المستخدمين الحاليين ═══ -->
+<div class="card">
+  <h3>👥 المستخدمين الحاليين (<span id="users-count">0</span>)</h3>
+  <input class="adm-search" id="search" placeholder="🔍 دوّر بالإيميل أو الاسم أو الشركة" oninput="renderUsers()">
+  <div class="adm-table-wrap">
+    <table class="adm-table">
+      <thead><tr>
+        <th>الإيميل</th><th style="width:15%">الاسم</th><th style="width:16%">الشركة</th>
+        <th style="width:84px">الدور</th><th style="width:76px">اتعمل</th><th style="width:196px">إجراءات</th>
+      </tr></thead>
+      <tbody id="users-body"></tbody>
+    </table>
+  </div>
+  <div class="adm-msg" id="table-msg"></div>
+</div>
+
+<!-- ═══ إضافة مستخدم لشركة موجودة ═══ -->
+<div class="card">
+  <h3>➕ إضافة مستخدم لشركة موجودة</h3>
+  <div class="adm-grid">
+    <div><label>الإيميل</label><input id="nu-email" type="email" dir="ltr"></div>
+    <div><label>الاسم (اختياري)</label><input id="nu-name"></div>
+    <div><label>الشركة</label><select id="nu-tenant"></select></div>
+    <div><label>الدور</label><select id="nu-role">{% for r in roles %}<option value="{{ r }}">{{ r }}</option>{% endfor %}</select></div>
+    <div>
+      <label>الباسورد (اختياري)</label><input id="nu-pass" type="text" dir="ltr" autocomplete="new-password">
+      <div class="adm-hint">سيبه فاضي وهيتولّد باسورد قوي تلقائياً ({{ min_password }} حروف على الأقل لو كتبته)</div>
+    </div>
+  </div>
+  <button class="btn btn-primary" type="button" id="nu-btn" onclick="createUser()">إضافة المستخدم</button>
+  <div class="adm-msg" id="nu-msg"></div>
+</div>
+
+<!-- ═══ شركة جديدة + أول مستخدم ═══ -->
+<div class="card">
+  <h3>🏢 شركة جديدة (عميل جديد) + أول مستخدم</h3>
+  <p class="page-sub" style="margin-bottom:12px">بتتعمل بكل الافتراضيات: إعدادات البوت، السياسات، الكلمات المفتاحية، التصنيفات، وسلّم المتابعة.</p>
+  <div class="adm-grid">
+    <div><label>اسم الشركة</label><input id="nt-name"></div>
+    <div>
+      <label>Slug</label><input id="nt-slug" dir="ltr" placeholder="trendora">
+      <div class="adm-hint">حروف إنجليزي صغيرة وأرقام وشرطة — بيظهر في رابط التحليلات</div>
+    </div>
+    <div><label>إيميل المالك</label><input id="nt-email" type="email" dir="ltr"></div>
+    <div><label>الباسورد (اختياري)</label><input id="nt-pass" type="text" dir="ltr" autocomplete="new-password"></div>
+    <div><label>اسم البوت</label><input id="nt-bot" value="سارة"></div>
+    <div>
+      <label>اللهجة</label>
+      <select id="nt-dialect">
+        <option>مصري</option><option>سعودي</option><option>إماراتي</option><option value="خليجي">خليجي (عام)</option>
+        <option>شامي</option><option>ليبي</option><option>فصحى</option>
+      </select>
+    </div>
+  </div>
+  <button class="btn btn-primary" type="button" id="nt-btn" onclick="createTenant()">إنشاء الشركة</button>
+  <div class="adm-msg" id="nt-msg"></div>
+</div>
+
+<script>
+let USERS = {{ users|tojson }};
+let TENANTS = {{ tenants_json|tojson }};
+const ROLES = {{ roles|list|tojson }};
+
+function el(tag, attrs, text) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === 'onclick' || k === 'oninput' || k === 'onchange') e[k] = v; else e.setAttribute(k, v);
+  }
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+function tenantSelect(selected) {
+  const s = el('select');
+  TENANTS.forEach(t => { const o = el('option', {value: t.id}, t.name); if (t.id === selected) o.selected = true; s.appendChild(o); });
+  return s;
+}
+function fillTenantDropdown() {
+  const s = document.getElementById('nu-tenant'); s.innerHTML = '';
+  TENANTS.forEach(t => s.appendChild(el('option', {value: t.id}, t.name)));
+}
+function msg(id, text, ok) {
+  const m = document.getElementById(id); m.textContent = text || ''; m.className = 'adm-msg ' + (ok ? 'ok' : 'err');
+}
+function showPw(email, pw) {
+  if (!pw) return;
+  document.getElementById('pw-for').textContent = email;
+  document.getElementById('pw-value').textContent = pw;
+  const b = document.getElementById('pw-box'); b.classList.add('show'); b.scrollIntoView({behavior: 'smooth', block: 'center'});
+}
+function copyPw() { navigator.clipboard && navigator.clipboard.writeText(document.getElementById('pw-value').textContent); }
+
+async function api(url, body) {
+  const r = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body || {})});
+  let data = {};
+  try { data = await r.json(); } catch (e) { data = {ok: false, error: 'حصل خطأ في السيرفر (' + r.status + ')'}; }
+  return data;
+}
+
+function renderUsers() {
+  const q = (document.getElementById('search').value || '').trim().toLowerCase();
+  const body = document.getElementById('users-body'); body.innerHTML = '';
+  const list = USERS.filter(u => !q || [u.email, u.full_name, u.tenant_name].join(' ').toLowerCase().includes(q));
+  document.getElementById('users-count').textContent = USERS.length;
+  list.forEach(u => {
+    const tr = el('tr');
+    const email = el('input', {type: 'email', dir: 'ltr'}); email.value = u.email;
+    const name = el('input'); name.value = u.full_name;
+    const ten = tenantSelect(u.tenant_id);
+    const role = el('select'); ROLES.forEach(r => { const o = el('option', {value: r}, r); if (r === u.role) o.selected = true; role.appendChild(o); });
+    [email, name, ten, role].forEach(i => i.oninput = i.onchange = () => tr.classList.add('dirty'));
+
+    const emailTd = el('td'); emailTd.appendChild(email);
+    if (u.is_super_admin) emailTd.appendChild(el('span', {class: 'badge badge-purple', style: 'margin-top:4px; display:inline-block'}, 'أدمن'));
+    if (u.is_me) emailTd.appendChild(el('span', {class: 'badge badge-green', style: 'margin:4px 4px 0; display:inline-block'}, 'انت'));
+    const nameTd = el('td'); nameTd.appendChild(name);
+    const tenTd = el('td'); tenTd.appendChild(ten);
+    const roleTd = el('td'); roleTd.appendChild(role);
+
+    const acts = el('div', {class: 'adm-actions'});
+    acts.appendChild(el('button', {class: 'btn btn-primary btn-sm', type: 'button', onclick: async () => {
+      const d = await api('/admin/api/users/' + u.id, {email: email.value, full_name: name.value, tenant_id: ten.value, role: role.value});
+      if (!d.ok) return msg('table-msg', '❌ ' + u.email + ': ' + d.error);
+      Object.assign(u, d.user); tr.classList.remove('dirty'); msg('table-msg', '✅ اتحفظ: ' + d.user.email, true); renderUsers();
+    }}, 'حفظ'));
+    acts.appendChild(el('button', {class: 'btn btn-secondary btn-sm', type: 'button', onclick: async () => {
+      const custom = prompt('باسورد جديد لـ ' + u.email + '\n(سيبه فاضي وهيتولّد باسورد قوي تلقائياً)');
+      if (custom === null) return;
+      const d = await api('/admin/api/users/' + u.id, {reset_password: true, new_password: custom});
+      if (!d.ok) return msg('table-msg', '❌ ' + d.error);
+      msg('table-msg', '✅ الباسورد اتغيّر لـ ' + u.email, true); showPw(u.email, d.password);
+    }}, '🔑 باسورد'));
+    if (!u.is_me) acts.appendChild(el('button', {class: 'btn btn-danger btn-sm', type: 'button', onclick: async () => {
+      if (!confirm('حذف الحساب ' + u.email + ' نهائياً؟ صاحبه مش هيقدر يدخل الداشبورد تاني.')) return;
+      const d = await api('/admin/api/users/' + u.id + '/delete');
+      if (!d.ok) return msg('table-msg', '❌ ' + d.error);
+      USERS = USERS.filter(x => x.id !== u.id); msg('table-msg', '🗑 اتحذف: ' + u.email, true); renderUsers();
+    }}, '🗑'));
+    const actTd = el('td'); actTd.appendChild(acts);
+
+    [emailTd, nameTd, tenTd, roleTd, el('td', {style: 'font-size:12px; color:var(--text-soft)'}, u.created_at), actTd].forEach(td => tr.appendChild(td));
+    body.appendChild(tr);
+  });
+}
+
+async function createUser() {
+  const btn = document.getElementById('nu-btn'); btn.disabled = true;
+  const d = await api('/admin/api/users', {
+    email: document.getElementById('nu-email').value, full_name: document.getElementById('nu-name').value,
+    tenant_id: document.getElementById('nu-tenant').value, role: document.getElementById('nu-role').value,
+    password: document.getElementById('nu-pass').value,
+  });
+  btn.disabled = false;
+  if (!d.ok) return msg('nu-msg', '❌ ' + d.error);
+  USERS.push(d.user); renderUsers();
+  ['nu-email', 'nu-name', 'nu-pass'].forEach(id => document.getElementById(id).value = '');
+  msg('nu-msg', '✅ اتضاف: ' + d.user.email, true); showPw(d.user.email, d.password);
+}
+
+async function createTenant() {
+  const btn = document.getElementById('nt-btn'); btn.disabled = true;
+  const d = await api('/admin/api/tenants', {
+    business_name: document.getElementById('nt-name').value, slug: document.getElementById('nt-slug').value,
+    email: document.getElementById('nt-email').value, password: document.getElementById('nt-pass').value,
+    bot_name: document.getElementById('nt-bot').value, dialect: document.getElementById('nt-dialect').value,
+  });
+  btn.disabled = false;
+  if (!d.ok) return msg('nt-msg', '❌ ' + d.error);
+  TENANTS.push({id: d.tenant.id, name: d.tenant.business_name}); fillTenantDropdown();
+  USERS.push(d.user); renderUsers();
+  ['nt-name', 'nt-slug', 'nt-email', 'nt-pass'].forEach(id => document.getElementById(id).value = '');
+  msg('nt-msg', '✅ اتعملت الشركة «' + d.tenant.business_name + '» والمالك ' + d.user.email, true);
+  showPw(d.user.email, d.password);
+}
+
+fillTenantDropdown();
+renderUsers();
+</script>
+{% endblock %}
