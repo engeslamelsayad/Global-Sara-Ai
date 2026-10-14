@@ -6,6 +6,29 @@
   <p class="page-sub">كل التفاصيل اللي بتحدد إزاي البوت بيتكلم ويرد على عملائك</p>
 </div>
 
+<style>
+  .af-card{border:2px solid var(--primary-light); background:linear-gradient(180deg,#FBF9FF,#fff)}
+  .af-sec{border:1px solid var(--border); border-radius:10px; padding:12px 14px; margin-top:12px; background:#fff}
+  .af-sec-head{display:flex; align-items:center; gap:8px; font-weight:700; margin-bottom:8px}
+  .af-sec-head input{width:auto; margin:0}
+  .af-field{margin:6px 0; font-size:14px; line-height:1.7}
+  .af-field .label{font-size:11px; font-weight:700; color:var(--text-soft)}
+  .af-rule{padding:6px 0; border-bottom:1px dashed var(--border); font-size:14px; line-height:1.7}
+  .af-rule:last-child{border-bottom:0}
+  .af-notes{background:var(--warn-bg); color:var(--warn); border-radius:10px; padding:10px 14px; margin-top:12px; font-size:13px}
+  .af-done{background:var(--success-bg); color:var(--success); border-radius:10px; padding:10px 14px; margin-top:12px; font-size:14px; font-weight:700}
+</style>
+<div class="card af-card">
+  <h3>✨ إعداد البوت تلقائياً</h3>
+  <p class="page-sub" style="margin-bottom:12px">
+    بيقرا وصف البزنس والمنتجات بأسعارها والسياسات واللهجة وأسلوب البيع المختار تحت،
+    ويقترح كل الخانات + القواعد الذكية مرة واحدة — متناسقين ومن غير تكرار أو معلومات مخترعة.
+    هتراجع الاقتراح وتختار اللي يتطبّق.
+  </p>
+  <button type="button" class="btn-ai" id="af-btn" onclick="autofillAll()">✨ اقترح إعداد كامل للبوت</button>
+  <div id="af-result" class="ai-box"></div>
+</div>
+
 <form method="POST" class="card">
   <h3>الهوية</h3>
   <button type="button" class="btn-ai" onclick="suggestPersona(this)">✨ اقترح شخصية مناسبة لبزنسي</button>
@@ -337,21 +360,121 @@ async function suggestObjections(){
   const btn = event.target; const box = document.getElementById('ai-obj-result');
   btn.disabled = true; btn.textContent = '⏳ جاري التفكير...';
   try{
-    const res = await fetch("{{ url_for('dashboard.ai_suggest_objections') }}", {method:'POST'});
+    const res = await fetch("{{ url_for('dashboard.ai_suggest_objections') }}", {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({dialect: document.getElementById('f-dialect').value, sales_style: _currentStyle()})
+    });
     const data = await res.json();
     if(data.error){ alert(data.error); return; }
+    // القيم بتتخزن في _sug وبتتعرض بـ esc — قبل كده كانت بتتحقن في HTML وفي template literal
+    _sug.obj_exp = data.objection_expensive || '';
+    _sug.obj_unsure = data.objection_unsure || '';
+    _sug.obj_later = data.objection_later || '';
     box.innerHTML = `
       <div class="ai-title">✨ اقتراحات ردود الاعتراضات</div>
-      <div class="ai-suggestion-item"><div class="label">غالي</div>${data.objection_expensive}
-        <span class="ai-apply-btn" onclick="applyField('f-obj-exp', \`${data.objection_expensive}\`)">تطبيق ←</span></div>
-      <div class="ai-suggestion-item"><div class="label">مش متأكد</div>${data.objection_unsure}
-        <span class="ai-apply-btn" onclick="applyField('f-obj-unsure', \`${data.objection_unsure}\`)">تطبيق ←</span></div>
-      <div class="ai-suggestion-item"><div class="label">هفكر</div>${data.objection_later}
-        <span class="ai-apply-btn" onclick="applyField('f-obj-later', \`${data.objection_later}\`)">تطبيق ←</span></div>`;
+      <div class="ai-suggestion-item"><div class="label">غالي</div>${esc(_sug.obj_exp)}
+        <span class="ai-apply-btn" onclick="applySug('f-obj-exp','obj_exp')">تطبيق ←</span></div>
+      <div class="ai-suggestion-item"><div class="label">مش متأكد</div>${esc(_sug.obj_unsure)}
+        <span class="ai-apply-btn" onclick="applySug('f-obj-unsure','obj_unsure')">تطبيق ←</span></div>
+      <div class="ai-suggestion-item"><div class="label">هفكر</div>${esc(_sug.obj_later)}
+        <span class="ai-apply-btn" onclick="applySug('f-obj-later','obj_later')">تطبيق ←</span></div>`;
     box.classList.add('show');
   }catch(e){ alert('حصل خطأ، حاول تاني'); }
   finally{ btn.disabled=false; btn.textContent='✨ اقترح ردود اعتراضات مناسبة'; }
 }
 function applyField(id, value){ document.getElementById(id).value = value; }
+
+// ── ✨ إعداد البوت تلقائياً ─────────────────────────────────────────
+let _af = null;
+function _currentStyle(){
+  const r = document.querySelector('input[name=sales_style]:checked');
+  return r ? r.value : '';
+}
+async function autofillAll(){
+  const btn = document.getElementById('af-btn'), box = document.getElementById('af-result');
+  btn.disabled = true; btn.textContent = '⏳ بيقرا بياناتك ويجهّز الإعداد... (ممكن ياخد دقيقة)';
+  box.classList.remove('show');
+  try{
+    const res = await fetch("{{ url_for('dashboard.ai_autofill') }}", {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({dialect: document.getElementById('f-dialect').value, sales_style: _currentStyle()})
+    });
+    const data = await res.json();
+    if(data.error){ alert(data.error); return; }
+    _af = data;
+    const field = (label, v) => `<div class="af-field"><div class="label">${esc(label)}</div><div style="white-space:pre-wrap">${esc(v)}</div></div>`;
+    const sec = (id, title, body, checked=true) =>
+      `<div class="af-sec"><label class="af-sec-head"><input type="checkbox" id="${id}" ${checked?'checked':''}> ${title}</label>${body}</div>`;
+    let html = `<div class="ai-title">✨ الإعداد المقترح <span style="font-weight:400;font-size:12px;color:#64748b">— مبني على ${data.products_used||0} منتج</span></div>`;
+    html += sec('af-s-identity', '👤 الهوية والشخصية',
+      field('الاسم', data.bot_name) + field('العمر', data.bot_age) + field('الشخصية', data.persona) + field('النبرة', data.tone));
+    html += sec('af-s-forbid', '🚫 الكلمات والافتتاحيات الممنوعة',
+      field('كلمات ممنوعة', (data.forbidden_words||[]).join('، ')) + field('افتتاحيات ممنوعة', (data.forbidden_openers||[]).join('\n')));
+    html += sec('af-s-obj', '🛡️ معالجة الاعتراضات',
+      field('غالي', data.objection_expensive) + field('مش متأكد', data.objection_unsure) + field('هفكر', data.objection_later));
+    const rules = data.smart_rules || [];
+    if(rules.length){
+      const catName = {sales:'🛒 مبيعات', safety:'🛡️ أمان', behavior:'🤖 سلوك', custom:'⚙️ أخرى'};
+      const rulesHtml = rules.map(r => `<div class="af-rule"><span class="badge badge-purple">${esc(catName[r.category]||r.category)}</span> ${esc(r.text)}</div>`).join('')
+        + `<label class="af-sec-head" style="margin-top:10px;font-weight:500;font-size:13px"><input type="checkbox" id="af-replace" checked>
+           أوقف القواعد الحالية المفعّلة (بتتوقف مش بتتمسح — تقدر ترجّعها من صفحة القواعد الذكية)</label>`;
+      html += sec('af-s-rules', `⚡ القواعد الذكية (${rules.length})`, rulesHtml);
+    }
+    if((data.notes||[]).length){
+      html += `<div class="af-notes"><b>⚠️ معلومات ناقصة عندك تستاهل تكملها:</b><br>${data.notes.map(esc).join('<br>')}</div>`;
+    }
+    html += `<div style="margin-top:14px"><button type="button" class="btn btn-primary" id="af-apply" onclick="applyAutofill()">✅ طبّق المختار</button></div>
+             <div id="af-done"></div>`;
+    box.innerHTML = html; box.classList.add('show');
+    box.scrollIntoView({behavior:'smooth', block:'start'});
+  }catch(e){ alert('حصل خطأ، حاول تاني'); }
+  finally{ btn.disabled = false; btn.textContent = '✨ اقترح إعداد كامل للبوت'; }
+}
+function _setField(id, value){
+  const el = document.getElementById(id); if(!el) return;
+  el.value = value; el.style.transition = 'background 0.3s'; el.style.background = '#DCFCE7';
+  setTimeout(() => el.style.background = '', 900);
+}
+async function applyAutofill(){
+  if(!_af) return;
+  const on = id => { const c = document.getElementById(id); return c && c.checked; };
+  const done = [];
+  if(on('af-s-identity')){
+    if(_af.bot_name) _setField('f-bot-name', _af.bot_name);
+    if(_af.bot_age) _setField('f-bot-age', _af.bot_age);
+    if(_af.persona) _setField('f-bot-persona', _af.persona);
+    if(_af.tone) _setField('f-tone', _af.tone);
+    done.push('الهوية');
+  }
+  if(on('af-s-forbid')){
+    _setField('f-forbidden-words', (_af.forbidden_words||[]).join(', '));
+    _setField('f-forbidden-openers', (_af.forbidden_openers||[]).join('\n'));
+    done.push('الممنوعات');
+  }
+  if(on('af-s-obj')){
+    _setField('f-obj-exp', _af.objection_expensive || '');
+    _setField('f-obj-unsure', _af.objection_unsure || '');
+    _setField('f-obj-later', _af.objection_later || '');
+    done.push('الاعتراضات');
+  }
+  let rulesMsg = '';
+  if(on('af-s-rules')){
+    const btn = document.getElementById('af-apply'); btn.disabled = true;
+    try{
+      const res = await fetch("{{ url_for('dashboard.ai_autofill_apply_rules') }}", {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({rules: _af.smart_rules || [], replace: on('af-replace')})
+      });
+      const d = await res.json();
+      if(d.error){ alert(d.error); }
+      else { rulesMsg = `⚡ اتضاف ${d.added} قاعدة ذكية واتحفظت` + (d.paused ? ` (واتوقفت ${d.paused} قاعدة قديمة)` : '') + '.'; }
+    }catch(e){ alert('حصل خطأ في حفظ القواعد'); }
+    finally{ btn.disabled = false; }
+  }
+  const box = document.getElementById('af-done');
+  box.innerHTML = `<div class="af-done">` +
+    (done.length ? `✅ اتملت خانات: ${esc(done.join('، '))} — <u>اضغط «حفظ التعديلات» تحت</u> عشان تتحفظ.<br>` : '') +
+    esc(rulesMsg) + `</div>`;
+}
 </script>
 {% endblock %}

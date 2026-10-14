@@ -532,17 +532,124 @@ def ai_suggest_persona():
     return jsonify(result)
 
 
+def _policies_text(policy):
+    """السياسات كنص للـ AI — دي الضمانات الوحيدة المسموح يقترحها"""
+    if not policy:
+        return ""
+    rows = [("طريقة الدفع", policy.payment_method), ("مدة التوصيل", policy.delivery_days),
+            ("الاسترجاع", policy.return_policy), ("الاستبدال", policy.exchange_policy),
+            ("المعاينة", policy.inspection_policy)]
+    out = [f"- {k}: {v.strip()}" for k, v in rows if (v or "").strip()]
+    if not policy.enable_installments:
+        out.append("- التقسيط: مش متاح")
+    return "\n".join(out)
+
+
+def _ai_request_overrides(tenant):
+    """اللهجة والأسلوب المختارين في الصفحة دلوقتي (حتى لو لسه ماتحفظوش) — وإلا المحفوظين"""
+    data = (request.get_json(silent=True) or {}) if request.is_json else {}
+    bc = tenant.bot_config
+    import sales_playbook
+    style = (data.get("sales_style") or "").strip()
+    if style not in sales_playbook.STYLES:
+        style = getattr(bc, "sales_style", None) or "balanced"
+    dialect = (data.get("dialect") or "").strip()[:40] or (bc.dialect if bc else "مصري")
+    return dialect, style
+
+
 @dashboard_bp.route("/settings/bot/ai-suggest-objections", methods=["POST"])
 @login_required_dashboard
 def ai_suggest_objections():
     tenant = _current_tenant()
     sample_product = Product.query.filter_by(tenant_id=tenant.id).first()
-    result = ai_assist.suggest_objection_responses(
-        tenant.business_description or "",
-        sample_product_name=sample_product.name if sample_product else "",
-        dialect=tenant.bot_config.dialect if tenant.bot_config else "مصري",
-    )
+    dialect, style = _ai_request_overrides(tenant)
+    try:
+        result = ai_assist.suggest_objection_responses(
+            tenant.business_description or "",
+            sample_product_name=sample_product.name if sample_product else "",
+            dialect=dialect, policies_text=_policies_text(tenant.policy), sales_style=style,
+        )
+    except Exception as e:
+        print(f"⚠️ ai_suggest_objections error: {e}")
+        return jsonify({"error": "حصل خطأ في الاتصال بالـ AI — حاول تاني"}), 500
     return jsonify(result)
+
+
+# ── ✨ إعداد البوت تلقائياً (كل الخانات + القواعد الذكية) ─────────────
+AUTOFILL_MAX_PRODUCTS = 25
+
+
+@dashboard_bp.route("/settings/bot/ai-autofill", methods=["POST"])
+@login_required_dashboard
+def ai_autofill():
+    """بيرجّع اقتراح كامل — مابيحفظش حاجة. التاجر بيراجع ويطبّق من الصفحة."""
+    tenant = _current_tenant()
+    if not (tenant.business_description or "").strip():
+        return jsonify({"error": "اكتب وصف البزنس في «بيانات البزنس» الأول — هو الأساس اللي البوت بيتبني عليه"}), 400
+    dialect, style = _ai_request_overrides(tenant)
+    from bot_engine import _display_price
+    currency = tenant.currency or "جنيه"
+    products = Product.query.filter_by(tenant_id=tenant.id, is_active=True).limit(AUTOFILL_MAX_PRODUCTS).all()
+    lines = []
+    for p in products:
+        line = f"- {p.name} — السعر: {_display_price(p, currency) or 'غير مسجّل'}"
+        if (p.description or "").strip():
+            line += f" — {p.description.strip()[:300]}"
+        lines.append(line)
+    bc = tenant.bot_config
+    ctx = {
+        "business_name": tenant.business_name, "industry": tenant.industry,
+        "business_description": (tenant.business_description or "")[:3000],
+        "dialect": dialect, "currency": currency, "sales_style": style,
+        "policies_text": _policies_text(tenant.policy),
+        "products_text": "\n".join(lines),
+        "limited_stock": bool(getattr(bc, "limited_stock_enabled", False)),
+    }
+    try:
+        result = ai_assist.autofill_bot_settings(ctx)
+    except Exception as e:
+        print(f"⚠️ ai_autofill error: {e}")
+        return jsonify({"error": "حصل خطأ في الاتصال بالـ AI — حاول تاني"}), 500
+    if result.get("error"):
+        return jsonify(result), 502
+    result["products_used"] = len(products)
+    return jsonify(result)
+
+
+@dashboard_bp.route("/settings/bot/ai-autofill/apply-rules", methods=["POST"])
+@login_required_dashboard
+def ai_autofill_apply_rules():
+    """
+    يضيف القواعد المقترحة. replace=True → القواعد الحالية المفعّلة بتتوقف (مش بتتمسح)
+    عشان التاجر يقدر يرجّعها من صفحة القواعد الذكية.
+    """
+    tenant = _current_tenant()
+    data = request.get_json(silent=True) if request.is_json else None
+    if data is None:
+        return jsonify({"error": "طلب غير صالح"}), 415
+    rules = []
+    for r in (data.get("rules") or [])[:ai_assist.AUTOFILL_MAX_RULES]:
+        text = str((r or {}).get("text") or "").strip()[:600]
+        cat = (r or {}).get("category")
+        if text:
+            rules.append((cat if cat in ai_assist.SMART_RULE_CATEGORIES else "custom", text))
+    if not rules:
+        return jsonify({"error": "مفيش قواعد للإضافة"}), 400
+    paused = 0
+    if data.get("replace"):
+        for old in SmartRule.query.filter_by(tenant_id=tenant.id, is_active=True).all():
+            old.is_active = False
+            paused += 1
+    for cat, text in rules:
+        db.session.add(SmartRule(tenant_id=tenant.id, rule_text=text, category=cat, is_active=True))
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        print(f"⚠️ ai_autofill_apply_rules error: {e}")
+        return jsonify({"error": "حصل خطأ أثناء حفظ القواعد — حاول تاني"}), 500
+    _invalidate(tenant)
+    return jsonify({"ok": True, "added": len(rules), "paused": paused})
 
 
 # =====================================================================
