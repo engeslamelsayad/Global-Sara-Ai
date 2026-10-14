@@ -35,6 +35,10 @@ app.register_blueprint(analytics_bp)
 app.register_blueprint(auth_bp)
 app.register_blueprint(dashboard_bp)
 
+# إدارة المستخدمين والشركات — للأدمن الرئيسي بس (SUPER_ADMIN_EMAILS)
+from admin import admin_bp
+app.register_blueprint(admin_bp)
+
 # صفحة الديمو الحية (عامة — أداة بيع الـ SaaS)
 from demo import demo_bp
 app.register_blueprint(demo_bp)
