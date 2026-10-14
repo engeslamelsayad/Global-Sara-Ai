@@ -57,3 +57,13 @@ def test_assertive_price_hint_bans_yes_no_close():
     assert "سؤال آه/لا" in sp.price_hint("assertive")
     assert "إغلاق افتراضي" in sp.price_hint("assertive")
     assert "إغلاق افتراضي" not in sp.price_hint("calm")
+
+
+def test_close_choice_never_offers_an_exit():
+    # «تحب تجرب ولا تفضّل تفكر فيه؟» = باب خروج (محادثة حقيقية على الحازم)
+    for style in ("assertive", "balanced"):
+        h = sp.objection_hint(style, 1)
+        assert "الاتنين بيوصلوا للطلب" in h and "ممنوع تحطي التفكير" in h
+        assert "السعر ÷ العدد" in h
+    assert "الاتنين بيوصلوا للطلب" in sp.price_hint("assertive")
+    assert "الاتنين بيوصلوا للطلب" not in sp.objection_hint("calm", 1)
