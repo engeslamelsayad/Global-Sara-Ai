@@ -323,7 +323,8 @@ def build_system_prompt(bundle, matched_product=None, state=None):
             rules_by_cat.setdefault(r.category, []).append(r.rule_text)
         smart_rules_txt = (
             "\n[قواعد ذكية مخصصة من صاحب البزنس — التزمي بها]\n"
-            "· لو قاعدة هنا اتعارضت مع خريطة البيع فوق، القاعدة دي هي اللي تمشي.\n"
+            "· لو قاعدة هنا اتعارضت مع خريطة البيع فوق، القاعدة دي هي اللي تمشي — بس عدد "
+            "محاولات الإغلاق بعد الاعتراض بيحدده أسلوبك، إلا لو قاعدة قالت صراحةً تقفي بعد أول اعتراض.\n"
             "· أي عبارة جاية بين «» بعد (لا تقولي / ممنوع / تجنبي / لا تكرري) ممنوعة حرفياً "
             "ومعناها كمان — ماتقوليهاش ولا بصياغة قريبة.\n")
         for cat, rules in rules_by_cat.items():
@@ -622,14 +623,8 @@ def build_system_prompt(bundle, matched_product=None, state=None):
                 f"🧭 العميل جاي من إعلان «{state['source_ad_title'][:80]}» — هو عارف المنتج "
                 f"ومهتم بيه. ماتسأليهوش أسئلة استكشافية عامة؛ ادخلي على القيمة والسعر والإغلاق.")
         elif state.get("stage") == "OBJECTION":
-            _n = state.get("objections_count", 1) or 1
-            _hint = ("🧭 العميل في مرحلة اعتراض — عالجي الاعتراض اللي قاله بالظبط بجملة قصيرة "
-                     "وضمانة مناسبة، وبعدها ارجعي للإغلاق.")
-            if _n >= 2:
-                _hint += (f" ⚠️ ده الاعتراض رقم {_n} — راجعي ردودك اللي فاتت في المحادثة: أي ميزة "
-                          "أو مكوّن أو ضمانة ذكرتيها قبل كده **ممنوع تتكرر**. لازم زاوية جديدة "
-                          "فعلاً، أو سؤال واحد يحدد اللي مقلقه بالظبط لو لسه مش واضح.")
-            dynamic_parts.append(_hint)
+            dynamic_parts.append(sales_playbook.objection_hint(
+                getattr(bc, "sales_style", None), state.get("objections_count", 1)))
         elif state.get("price_quoted"):
             dynamic_parts.append(
                 "🧭 العميل عرف السعر خلاص — ماتعيديش السعر إلا لو سأل. ركّزي على الإغلاق: "
