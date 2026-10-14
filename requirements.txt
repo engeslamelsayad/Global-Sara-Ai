@@ -4,5 +4,5 @@ flask-login
 psycopg2-binary
 werkzeug
 redis
-anthropic
+anthropic>=1.13.0
 requests

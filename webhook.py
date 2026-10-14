@@ -94,10 +94,10 @@ def receive_message():
                     else:
                         # التحويل مش متاح (مفيش OPENAI_API_KEY) أو فشل — التوجيه القديم
                         print(f"🎤 Voice message from {sender_id} — sending guidance")
-                        voice_reply = (
-                            "سمعت إنك بعتّ رسالة صوتية 🎤 بس للأسف مش بقدر أسمع الصوت دلوقتي — "
-                            "ممكن تكتبلي اللي محتاجه بالكتابة وأنا تحت أمرك على طول 😊"
-                        )
+                        import dialect_text
+                        _bc = bundle.get("bot_config")
+                        voice_reply = dialect_text.get_msg(
+                            _bc.dialect if _bc else "مصري", "voice_note")
                         send_message(bundle, sender_id, voice_reply, page_id, platform)
                         continue
 

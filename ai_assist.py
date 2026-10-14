@@ -20,24 +20,27 @@ import requests as _requests
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-ASSIST_MODEL = "claude-haiku-4-5-20251001"
+import model_catalog
+
+ASSIST_MODEL = "claude-haiku-5-5"
 
 # نماذج مدرّب المبيعات — Sonnet أدق في المقارنة بين المحادثات الكاسبة والخسرانة
 COACH_MODELS = {
-    "haiku":  "claude-haiku-4-5-20251001",
-    "sonnet": "claude-sonnet-5",
+    "haiku":  "claude-haiku-5-5",
+    "sonnet": "claude-sonnet-5-5",
 }
 
 
-def _ask_json(prompt, max_tokens=800, model=None):
+def _ask_json(prompt, max_tokens=800, model=None, think=False):
     """ينادي Claude ويطلب رد JSON فقط، مع parsing آمن ومرن"""
+    model = model or ASSIST_MODEL
     response = client.messages.create(
-        model=model or ASSIST_MODEL,
-        max_tokens=max_tokens,
+        model=model,
         system="ترد بصيغة JSON صحيحة فقط، بدون أي نص إضافي أو markdown fences.",
         messages=[{"role": "user", "content": prompt}],
+        **model_catalog.request_kwargs(model, max_tokens, think=think),
     )
-    raw = response.content[0].text.strip()
+    raw = model_catalog.response_text(response)
     raw = raw.replace("```json", "").replace("```", "").strip()
     truncated = getattr(response, "stop_reason", None) == "max_tokens"
     try:
@@ -90,6 +93,7 @@ def suggest_bot_persona(business_description, industry="", dialect="مصري"):
   مثال لو اللهجة مصري: كلمات شامية/خليجية زي (هلق، شو، هيك، منيح، وش، أبغى، الحين، زين).
   مثال لو اللهجة سعودي أو إماراتي أو خليجي: كلمات مصرية زي (إيه، إزاي، دلوقتي، أوي، خالص، عايز).
   مثال لو اللهجة شامي: كلمات مصرية وخليجية.
+  مثال لو اللهجة ليبي: كلمات مصرية وشامية ومغربية زي (دلوقتي، عايز، هلق، شو، دابا، بزاف).
   ضيف كمان أي كلمات رسمية/فصحى جامدة مش مناسبة للبيع بلهجة «{dialect}».
   من 6 لـ 12 كلمة.
 - "suggested_forbidden_openers": جمل بداية ضعيفة أو مستهلكة تخلي الرد يبان آلي أو بارد،
@@ -590,7 +594,8 @@ def coach_analysis(segments, stats, business_name="", business_description="",
 من 3 لـ 6 إصلاحات. اكتب كل النصوص بلهجة {dialect}."""
 
     model = COACH_MODELS.get(model_key, COACH_MODELS["haiku"])
-    result = _ask_json(prompt, max_tokens=3000, model=model)
+    # تحليل عميق — التفكير بيفرق هنا (Sonnet 5 كان بيفكّر افتراضياً)
+    result = _ask_json(prompt, max_tokens=3000, model=model, think=True)
     if result.get("error") or "fixes" not in result:
         return None
     return result

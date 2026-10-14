@@ -34,6 +34,7 @@
         <option value="إماراتي" {{ 'selected' if bc.dialect=='إماراتي' }}>إماراتي</option>
         <option value="خليجي" {{ 'selected' if bc.dialect=='خليجي' }}>خليجي (عام)</option>
         <option value="شامي" {{ 'selected' if bc.dialect=='شامي' }}>شامي</option>
+        <option value="ليبي" {{ 'selected' if bc.dialect=='ليبي' }}>ليبي</option>
         <option value="فصحى" {{ 'selected' if bc.dialect=='فصحى' }}>فصحى</option>
       </select>
     </div>
@@ -92,13 +93,13 @@
 
   <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:12px">
     {% for m in models %}
-    <label class="model-card {{ 'model-selected' if (bc.model_name or 'claude-haiku-4-5-20251001') == m.id }}"
-           style="cursor:pointer; border:2px solid {{ m.badge_color if (bc.model_name or 'claude-haiku-4-5-20251001') == m.id else '#E2E8F0' }};
+    <label class="model-card {{ 'model-selected' if (bc.model_name or 'claude-haiku-5-5') == m.id }}"
+           style="cursor:pointer; border:2px solid {{ m.badge_color if (bc.model_name or 'claude-haiku-5-5') == m.id else '#E2E8F0' }};
                   border-radius:14px; padding:14px; margin:0; display:block; transition:all .2s;
-                  background:{{ m.badge_color ~ '0D' if (bc.model_name or 'claude-haiku-4-5-20251001') == m.id else '#fff' }}">
+                  background:{{ m.badge_color ~ '0D' if (bc.model_name or 'claude-haiku-5-5') == m.id else '#fff' }}">
       <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px">
         <input type="radio" name="model_name" value="{{ m.id }}" style="width:16px; height:16px; margin:0"
-               {{ 'checked' if (bc.model_name or 'claude-haiku-4-5-20251001') == m.id }}
+               {{ 'checked' if (bc.model_name or 'claude-haiku-5-5') == m.id }}
                onchange="selectModel(this)">
         <strong style="font-size:15px">{{ m.label }}</strong>
         <span style="background:{{ m.badge_color }}22; color:{{ m.badge_color }}; border-radius:8px;

@@ -17,7 +17,7 @@ import anthropic
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-EXTRACT_MODEL = "claude-haiku-4-5-20251001"
+EXTRACT_MODEL = "claude-haiku-5-5"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -480,12 +480,13 @@ def _try_scrape(url, dialect, max_products):
 لو مفيش منتجات واضحة، رد بـ {{"products": []}}. أقصى {max_products} منتج."""
 
     try:
+        import model_catalog
         resp = client.messages.create(
             model=EXTRACT_MODEL,
-            max_tokens=2000,
             messages=[{"role": "user", "content": prompt}],
+            **model_catalog.request_kwargs(EXTRACT_MODEL, 2000),
         )
-        raw = resp.content[0].text.strip()
+        raw = model_catalog.response_text(resp)
         raw = re.sub(r"^```json\s*|\s*```$", "", raw).strip()
         parsed = json.loads(raw)
     except Exception as e:

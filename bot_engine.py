@@ -34,8 +34,9 @@ ORDER_PATTERN = re.compile(
 )
 
 # النموذج الافتراضي للرد على العملاء — Haiku: سريع واقتصادي
-# (التاجر يقدر يغيّره من الداشبورد لكل حساب)
-DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+# (التاجر يقدر يغيّره من الداشبورد لكل حساب) — القائمة في model_catalog.py
+import model_catalog
+DEFAULT_MODEL = model_catalog.DEFAULT_MODEL_ID
 
 # علامة التصنيف المخصص — الـ AI بيطلعها لما شرط التاجر يتحقق
 # مثال: [LABEL|عميل جملة]
@@ -759,13 +760,19 @@ def get_ai_response(bundle, sender_id, user_message, state,
 
     messages = history + [{"role": "user", "content": user_content}]
 
+    _model = bc.model_name or DEFAULT_MODEL
+    _model = model_catalog.LEGACY_UPGRADES.get(_model, _model)
     response_obj = client.messages.create(
-        model=bc.model_name or DEFAULT_MODEL,
-        max_tokens=bc.max_tokens or 600,
+        model=_model,
         system=system_blocks,
         messages=messages,
+        **model_catalog.request_kwargs(_model, bc.max_tokens or 600),
     )
-    response_text = response_obj.content[0].text
+    response_text = model_catalog.response_text(response_obj)
+    if not response_text:
+        # رفض من الـ safety classifiers أو الرد اتقطع قبل أي نص —
+        # مانبعتش رسالة فاضية للعميل، نسيبها لـ _handle_ai_failure
+        raise RuntimeError(f"AI returned no text (stop_reason={response_obj.stop_reason})")
 
     # ── كشف التصنيفات المخصصة ([LABEL|اسم]) ──
     # الـ AI بيطلعها لما شرط التاجر يتحقق. بنشيلها من الرد (العميل مايشوفهاش)
@@ -943,6 +950,22 @@ def push_to_google_sheet_async(tenant, order_data, page_id):
     threading.Thread(
         target=push_to_google_sheet, args=(tenant, order_data, page_id), daemon=True
     ).start()
+
+
+def _display_price(product, currency="جنيه"):
+    """
+    سعر المنتج للعرض على العميل بعملة الـ tenant.
+    price_note نص حر من التاجر: لو فيه كلام (زي "450 شامل الشحن") بيتعرض زي ما هو،
+    ولو رقم بس بنضيفله العملة. وإلا price_amount + العملة. مفيش سعر → "".
+    """
+    import re as _re
+    note = (product.price_note or "").strip()
+    if note:
+        return note if _re.search(r"[^\d\s.,]", note) else f"{note} {currency}"
+    if product.price_amount:
+        amt = float(product.price_amount)
+        return f"{int(amt) if amt.is_integer() else amt} {currency}"
+    return ""
 
 
 def compute_order_price(product, state, discount_code="", currency="جنيه"):
@@ -1425,6 +1448,77 @@ def apply_stage_labels(bundle, sender_id, page_id, stage):
 # =====================================================================
 # MAIN PROCESSING — تُستدعى بعد انتهاء الـ debounce
 # =====================================================================
+# =====================================================================
+# فشل استدعاء الـ AI — رسالة انتظار للعميل + تنبيه تليجرام للتاجر
+# =====================================================================
+# incident سابق: رصيد Anthropic خلص والرسايل اتبلعت في صمت (الـ exception
+# كان بيموت جوه الـ Timer thread). دلوقتي: العميل ياخد رسالة انتظار بلهجته
+# (مرة كل ساعة بالكتير)، والتاجر ياخد تنبيه عشان يرد من الإنبوكس.
+# ماحطّيناش is_human_handoff — أول ما الـ AI يرجع البوت يكمل لوحده،
+# ولو الموديريتور رد فعلاً الـ echo هيوقف البوت للمحادثة دي عادي.
+AI_DOWN_CUSTOMER_COOLDOWN = 3600   # ثانية بين رسايل الانتظار لنفس العميل
+AI_DOWN_ALERT_COOLDOWN    = 600    # ثانية بين تنبيهات تليجرام لنفس الـ tenant
+
+_ai_fail_alerts = {}      # {tenant_id: {"last": ts, "missed": n}}
+_ai_fail_lock = threading.Lock()
+
+
+def _classify_ai_error(e):
+    """(نوع, وصف للتاجر)"""
+    msg = str(e).lower()
+    if isinstance(e, anthropic.BadRequestError) and ("credit" in msg or "billing" in msg):
+        return "credit", "رصيد Anthropic خلص 💳"
+    if isinstance(e, (anthropic.AuthenticationError, anthropic.PermissionDeniedError)):
+        return "auth", "مفتاح Anthropic مش شغال 🔑"
+    if isinstance(e, (anthropic.RateLimitError, anthropic.InternalServerError,
+                      anthropic.APIConnectionError)) or \
+            (isinstance(e, anthropic.APIStatusError) and e.status_code >= 500):
+        return "transient", "خدمة Anthropic مضغوطة أو واقعة مؤقتاً ⏳"
+    if "AI returned no text" in str(e):
+        return "empty", f"الموديل مارجّعش رد ({str(e).split('=')[-1].rstrip(')')})"
+    return "other", f"خطأ غير متوقع: {type(e).__name__}"
+
+
+def _handle_ai_failure(bundle, sender_id, user_message, state, page_id, platform, e):
+    import traceback
+    import dialect_text
+    tenant = bundle["tenant"]
+    kind, reason = _classify_ai_error(e)
+    print(f"❌ AI call failed ({kind}) tenant={tenant.id} sender={sender_id}: {e}")
+    traceback.print_exc()
+
+    # رسالة العميل تتحفظ في التاريخ عشان الـ AI يشوفها لما يرجع
+    hist_text = user_message or "[صورة]"
+    history = state.get("history", []) + [{"role": "user", "content": hist_text}]
+
+    now = time.time()
+    if now - state.get("ai_down_notified_at", 0) > AI_DOWN_CUSTOMER_COOLDOWN:
+        _bc = bundle.get("bot_config")
+        hold = dialect_text.get_msg(_bc.dialect if _bc else "مصري", "ai_down")
+        send_message(bundle, sender_id, hold, page_id, platform)
+        # في التاريخ كـ assistant — عشان handle_echo يعرف إن ده صدانا ومايوقفش البوت
+        history.append({"role": "assistant", "content": hold})
+        state["ai_down_notified_at"] = now
+    history = history[-16:]
+    while history and history[0].get("role") != "user":
+        history.pop(0)   # الـ API محتاج التاريخ يبدأ برسالة user
+    state["history"] = history
+
+    with _ai_fail_lock:
+        info = _ai_fail_alerts.setdefault(tenant.id, {"last": 0, "missed": 0})
+        info["missed"] += 1
+        if now - info["last"] < AI_DOWN_ALERT_COOLDOWN:
+            return
+        missed, info["last"], info["missed"] = info["missed"], now, 0
+
+    _telegram_alert(tenant,
+        f"⚠️ <b>البوت مش قادر يرد على العملاء!</b>\n"
+        f"السبب: {reason}\n"
+        f"رسايل من غير رد آلي (آخر {AI_DOWN_ALERT_COOLDOWN // 60} دقايق): {missed}\n"
+        f"آخر رسالة: «{(user_message or '')[:100]}»\n"
+        f"العميل خد رسالة انتظار — افتح الإنبوكس ورد بنفسك.")
+
+
 def do_process_message(tenant_id, sender_id, user_message, page_id, platform,
                        image_b64=None, image_media_type="image/jpeg"):
     bundle = _tenant_cache.get(page_id, (None,))[0]
@@ -1475,10 +1569,17 @@ def do_process_message(tenant_id, sender_id, user_message, page_id, platform,
         save_state(tenant_id, sender_id, state)
         return
 
-    reply, new_order, matched_product = get_ai_response(
-        bundle, sender_id, user_message, state,
-        image_b64=image_b64, image_media_type=image_media_type
-    )
+    try:
+        reply, new_order, matched_product = get_ai_response(
+            bundle, sender_id, user_message, state,
+            image_b64=image_b64, image_media_type=image_media_type
+        )
+    except Exception as e:
+        # رصيد خلص / مفتاح غلط / Anthropic واقع — مانبلعش الرسالة في صمت
+        _handle_ai_failure(bundle, sender_id, user_message, state,
+                           page_id, platform, e)
+        save_state(tenant_id, sender_id, state)
+        return
     send_message(bundle, sender_id, reply, page_id, platform)
 
     if new_order:
@@ -1503,11 +1604,13 @@ def do_process_message(tenant_id, sender_id, user_message, page_id, platform,
                  if p.product_key == cross_key and p.is_active), None)
             if cross_prod:
                 time.sleep(1.0)
-                upsell_msg = (
-                    f"🎁 معلومة على الماشي: كتير من عملائنا بيضيفوا "
-                    f"«{cross_prod.name}» مع طلبهم — {cross_prod.price_note or ''}. "
-                    f"تحب أضيفهولك في نفس الطلب من غير شحن إضافي؟ 😊"
-                )
+                import dialect_text
+                _cur = getattr(bundle["tenant"], "currency", None) or "جنيه"
+                _pr = _display_price(cross_prod, _cur)
+                upsell_msg = dialect_text.get_msg(
+                    bundle["bot_config"].dialect if bundle.get("bot_config") else "مصري",
+                    "upsell", p=f"«{cross_prod.name}»",
+                    pr=f" — {_pr}" if _pr else "")
                 send_message(bundle, sender_id, upsell_msg, page_id, platform)
                 state["upsell_sent"] = True
                 print(f"🎁 Upsell offered: {cross_prod.product_key}")
