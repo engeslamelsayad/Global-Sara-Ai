@@ -15,6 +15,11 @@ def init_db(app):
     # Railway بيدّي رابط بصيغة postgres:// لكن SQLAlchemy الحديث محتاج postgresql://
     if db_url.startswith("postgres://"):
         db_url = db_url.replace("postgres://", "postgresql://", 1)
+    # SQLAlchemy 2.1 غيّر الـ driver الافتراضي لـ postgresql:// من psycopg2 لـ psycopg (v3)
+    # — واحنا متسطّب عندنا psycopg2-binary بس، فالإقلاع كان بيقع بـ
+    # "No module named 'psycopg'". بنحدد الـ driver صراحةً.
+    if db_url.startswith("postgresql://"):
+        db_url = db_url.replace("postgresql://", "postgresql+psycopg2://", 1)
 
     if not db_url:
         # fallback محلي للتجربة بدون Postgres (SQLite)
