@@ -34,3 +34,26 @@ def test_balanced_block_bans_first_objection_exit():
     assert "أول اعتراض عمره ما يكون نهاية المحادثة" in pb
     assert "[🛑 إمتى تقفي]" in pb
     assert "أول اعتراض عمره" not in sp.playbook("calm")
+
+
+# ── الرفض الصريح («لا») — من محادثة حقيقية على الحازم: البوت ودّع العميل من أول «لا» ──
+
+def test_first_refusal_is_not_the_end_for_assertive_and_balanced():
+    for style in ("assertive", "balanced"):
+        h = sp.objection_hint(style, 1, refusals=1)
+        assert "مش نهاية" in h and "ممنوع توديع" in h
+
+
+def test_second_refusal_stops():
+    for style in ("assertive", "balanced"):
+        assert "وقفي المحاولة" in sp.objection_hint(style, 3, refusals=2)
+
+
+def test_calm_respects_first_refusal():
+    assert "احترمي قراره فوراً" in sp.objection_hint("calm", 1, refusals=1)
+
+
+def test_assertive_price_hint_bans_yes_no_close():
+    assert "سؤال آه/لا" in sp.price_hint("assertive")
+    assert "إغلاق افتراضي" in sp.price_hint("assertive")
+    assert "إغلاق افتراضي" not in sp.price_hint("calm")
