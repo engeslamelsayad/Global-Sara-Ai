@@ -358,6 +358,18 @@ def build_system_prompt(bundle, matched_product=None, state=None):
     import sales_playbook
     _playbook = sales_playbook.playbook(getattr(bc, "sales_style", None))
 
+    # ندرة حقيقية — بس لو التاجر أكدها من الإعدادات (القاعدة #15)
+    if getattr(bc, "limited_stock_enabled", False):
+        _stock_fact = (getattr(bc, "limited_stock_note", None) or "").strip() or "الكميات المتاحة محدودة"
+        _stock_txt = (
+            "\n[📦 المخزون — معلومة حقيقية من صاحب البزنس]\n"
+            f"{_stock_fact}\n"
+            "مسموح تستخدميها كسبب حقيقي للاستعجال حسب أسلوب البيع بتاعك — بكلامك وبلهجتك.\n"
+            "❌ ممنوع تقولي رقم محدد للكمية المتبقية إلا لو مكتوب حرفياً في السطر اللي فوق.\n")
+    else:
+        _stock_txt = ("\n[📦 المخزون]\nمفيش معلومة عن محدودية المخزون — "
+                      "ممنوع تقولي إن الكمية محدودة أو قربت تخلص.\n")
+
     static_prompt = f"""أنت {bc.bot_name}، {bc.bot_persona}.
 عمرك {bc.bot_age} سنة. بتتكلم بلهجة {bc.dialect} بنبرة {bc.tone}.
 
@@ -409,7 +421,7 @@ def build_system_prompt(bundle, matched_product=None, state=None):
 - العميل سأل لو المنتج متوفر → سطر واحد: تأكيد التوفر + سؤال
 - العميل طلب مقارنة بين منتجين وأنهي أنسب لاستخدامه → هنا بس تفصّلي شوية
 {_playbook}
-
+{_stock_txt}
 [سياسات الشركة الثابتة]
 - طريقة الدفع: {policy.payment_method if policy else "غير محدد"}
 - مدة التوصيل: {policy.delivery_days if policy else "غير محدد"}
