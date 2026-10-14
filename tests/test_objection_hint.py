@@ -67,3 +67,10 @@ def test_close_choice_never_offers_an_exit():
         assert "السعر ÷ العدد" in h
     assert "الاتنين بيوصلوا للطلب" in sp.price_hint("assertive")
     assert "الاتنين بيوصلوا للطلب" not in sp.objection_hint("calm", 1)
+
+
+def test_no_fake_staff_options():
+    # «نقدر نشوف مع الموظف أي خيارات تناسب ميزانيتك» = وعد بخصم مش موجود + خروج من المحادثة
+    for style in ("assertive", "balanced"):
+        assert "نشوف مع الموظف" in sp.objection_hint(style, 2)
+    assert "تشوفي مع الموظف" in sp.playbook("calm")   # في _CORE — كل الأساليب
