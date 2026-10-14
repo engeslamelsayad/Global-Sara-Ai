@@ -63,6 +63,29 @@ def _ask_json(prompt, max_tokens=800, model=None, think=False):
 
 
 # =====================================================================
+# قواعد مشتركة لأي نص البوت هيقراه كتعليمات أو كحقيقة عن المنتج
+# =====================================================================
+# درس من محادثة حقيقية (أكتوبر 2026): قواعد مكتوبة بـ «لا تقولي «X»» زرعت X في
+# ردود البوت، وقواعد متكررة/متعارضة لخبطته، وحقايق مخترعة (مدة نتيجة، ضمان)
+# البوت كررها كأنها مؤكدة.
+_FACTS_ONLY = """
+قاعدة الحقايق (مهمة جداً):
+- اكتب بس اللي موجود فعلاً في النص/البيانات اللي قدامك. أي معلومة مش مذكورة
+  (مدة ظهور نتيجة، ضمان، مكونات، أرقام، مقارنات) سيب الحقل بتاعها فاضي "" — ماتخمّنش.
+- ممنوع وعود علاجية أو تجميلية مضمونة، أو ندرة، أو خصومات مش مذكورة.
+- إجابات الأسئلة الشائعة تكون من البيانات بس؛ لو مفيش إجابة موثّقة ماتحطش السؤال."""
+
+_INSTRUCTION_STYLE = """
+أسلوب كتابة التعليمات (البوت هيقراها حرفياً):
+- اكتب المطلوب بالإيجاب ("اذكري الفايدة كحقيقة عن المنتج")، مش الممنوع.
+  ممنوع صيغة «لا تقولي "عبارة"» — ذكر العبارة بيخلي البوت يقولها.
+- جمل قصيرة وواضحة. كل فكرة مرة واحدة بس — من غير تكرار بين الحقول.
+- ماتكررش سلوك البيع العام (الإغلاق، الصدق، الضمانات، اللهجة، طول الرد) —
+  النظام بيتعامل معاه لوحده. ركّز على اللي خاص بالبزنس ده بس.
+- أي حقيقة (سعر، توصيل، ضمان، سياسة) لازم تكون من البيانات المعطاة."""
+
+
+# =====================================================================
 # 1) اقتراح شخصية البوت بناءً على وصف البزنس
 # =====================================================================
 def suggest_bot_persona(business_description, industry="", dialect="مصري"):
@@ -105,14 +128,18 @@ def suggest_bot_persona(business_description, industry="", dialect="مصري"):
 # =====================================================================
 # 2) اقتراح نصوص معالجة الاعتراضات
 # =====================================================================
-def suggest_objection_responses(business_description, sample_product_name="", dialect="مصري"):
+def suggest_objection_responses(business_description, sample_product_name="", dialect="مصري",
+                                policies_text="", sales_style=""):
     """
-    يقترح 3 ردود (غالي / مش متأكد / هفكر) مخصصة لطبيعة البزنس
+    يقترح 3 ردود (غالي / مش متأكد / هفكر) مخصصة لطبيعة البزنس — مبنية على سياساته الحقيقية
     """
     prompt = f"""بزنس صاحبه وصفه كده:
 "{business_description}"
 مثال منتج من عندهم: "{sample_product_name or "غير محدد"}"
 اللهجة: {dialect}
+أسلوب البيع المختار: {sales_style or "غير محدد"}
+سياسات البزنس (الضمانات المسموح ذكرها بس دي):
+{policies_text or "غير محددة"}
 
 اقترح استراتيجية رد على 3 اعتراضات شائعة من العملاء، مناسبة لطبيعة هذا البزنس تحديداً
 (مثلاً لو البزنس طبي قارن بزيارة دكتور، لو إلكترونيات قارن بمنتج منافس، إلخ).
@@ -121,8 +148,9 @@ def suggest_objection_responses(business_description, sample_product_name="", di
   "objection_expensive": "استراتيجية الرد على 'غالي' في جملة أو جملتين",
   "objection_unsure": "استراتيجية الرد على 'مش متأكد/خايف' في جملة أو جملتين",
   "objection_later": "استراتيجية الرد على 'هفكر/بكره' في جملة أو جملتين"
-}}"""
-    return _ask_json(prompt)
+}}
+""" + _INSTRUCTION_STYLE + _FACTS_ONLY
+    return _ask_json(prompt, max_tokens=1500)
 
 
 # =====================================================================
@@ -153,7 +181,8 @@ def suggest_product_details(short_input, business_description="", dialect="مص�
     {{"q": "سؤال شائع 1", "a": "جواب مقنع 1"}},
     {{"q": "سؤال شائع 2", "a": "جواب مقنع 2"}}
   ]
-}}"""
+}}
+""" + _FACTS_ONLY
     result = _ask_json(prompt, max_tokens=3000)
 
     # حوّل faq_pairs لـ text بسيط للـ textarea
@@ -330,7 +359,8 @@ def suggest_product_from_url(url, business_description="", dialect="مصري"):
     {{"q": "سؤال شائع 2", "a": "جواب مقنع 2"}}
   ],
   "price_note": "معلومة السعر لو ذُكرت في الصفحة، وإلا اتركها فارغة"
-}}"""
+}}
+""" + _FACTS_ONLY
 
     result = _ask_json(prompt, max_tokens=3000)
 
@@ -393,7 +423,8 @@ def enrich_products_batch(products, business_description="", dialect="مصري")
     }}
   ]
 }}
-مهم: رجّع كل المنتجات بنفس الـ index بتاعها."""
+مهم: رجّع كل المنتجات بنفس الـ index بتاعها.
+""" + _FACTS_ONLY
 
     result = _ask_json(prompt, max_tokens=8000)
     if result.get("error"):
@@ -598,4 +629,94 @@ def coach_analysis(segments, stats, business_name="", business_description="",
     result = _ask_json(prompt, max_tokens=3000, model=model, think=True)
     if result.get("error") or "fixes" not in result:
         return None
+    return result
+
+
+# =====================================================================
+# 8) ✨ إعداد البوت تلقائياً — كل خانات "شخصية البوت" + القواعد الذكية مرة واحدة
+# =====================================================================
+# بيشوف كل بيانات التاجر (الوصف، المنتجات بأسعارها، السياسات، اللهجة، الأسلوب)
+# ويقترح إعداد متناسق بدل خانات متفرقة كل واحدة لوحدها. Sonnet + تفكير: ده
+# إعداد بيتعمل مرة واحدة وجودته بتأثر على كل محادثة بعده (~سنتات قليلة للمرة).
+AUTOFILL_MODEL = COACH_MODELS["sonnet"]
+AUTOFILL_MAX_RULES = 6
+SMART_RULE_CATEGORIES = ("sales", "safety", "behavior", "custom")
+
+
+def autofill_bot_settings(ctx):
+    """
+    ctx: dict فيه business_name, business_description, industry, dialect, currency,
+         sales_style, policies_text, products_text, limited_stock
+    بيرجّع dict بكل الحقول + smart_rules + notes — أو {"error": ...}
+    """
+    prompt = f"""انت خبير إعداد بوتات مبيعات على ماسنجر وإنستجرام. مطلوب منك تجهّز إعدادات بوت
+لبزنس حقيقي من البيانات دي بس:
+
+[البزنس]
+الاسم: {ctx.get("business_name") or "غير محدد"}
+المجال: {ctx.get("industry") or "غير محدد"}
+الوصف: {ctx.get("business_description") or "غير محدد"}
+العملة: {ctx.get("currency") or "غير محددة"}
+اللهجة المطلوبة: {ctx.get("dialect") or "مصري"}
+أسلوب البيع المختار: {ctx.get("sales_style") or "balanced"}
+المخزون محدود فعلاً (التاجر أكّد): {"أيوه" if ctx.get("limited_stock") else "لأ"}
+
+[السياسات — الضمانات المسموح ذكرها بس دي]
+{ctx.get("policies_text") or "غير محددة"}
+
+[المنتجات]
+{ctx.get("products_text") or "مفيش منتجات مضافة"}
+
+رد بصيغة JSON بالظبط بالشكل ده:
+{{
+  "bot_name": "اسم أنثوي بسيط مناسب للهجة",
+  "bot_age": رقم بين 22 و35,
+  "persona": "وصف الشخصية في 2-3 جمل: مين هي، بتبيع إيه، ولمين. من غير قواعد سلوك.",
+  "tone": "النبرة في 3-5 كلمات",
+  "forbidden_words": ["6-12 كلمة من لهجات تانية غير المطلوبة عشان البوت مايخلطش"],
+  "forbidden_openers": ["3-5 بدايات رد ضعيفة أو باردة بنفس اللهجة"],
+  "objection_expensive": "إزاي يرد على اعتراض السعر لبزنس ده بالذات — جملتين بالكتير",
+  "objection_unsure": "إزاي يطمّن المتردد — جملتين بالكتير، من الضمانات اللي في السياسات بس",
+  "objection_later": "إزاي يتعامل مع التأجيل — جملتين بالكتير",
+  "smart_rules": [
+    {{"category": "sales أو safety أو behavior أو custom", "text": "قاعدة واحدة في جملة أو جملتين"}}
+  ],
+  "notes": ["معلومة ناقصة عند التاجر تستاهل يكملها (لو فيه)"]
+}}
+
+قواعد القواعد الذكية (smart_rules):
+- من 2 لـ {AUTOFILL_MAX_RULES} قواعد بالكتير، كل واحدة عن حاجة **خاصة بالبزنس ده** ومش متغطية
+  في الحقول التانية: مناطق التوصيل، طريقة استخدام أو تحذير لمنتج معين، لمين المنتج
+  مايناسبش (لو مذكور)، إيه اللي يتحوّل لموظف.
+- قاعدة "safety" لأي منتج عناية/صحة: من غير تشخيص ولا وعد بنتيجة، ولو فيه حالة طبية → يرجع لدكتور.
+- القاعدة ماتعارضش أسلوب البيع المختار ({ctx.get("sales_style") or "balanced"}).
+- مفيش قاعدتين بيقولوا نفس الحاجة.
+""" + _INSTRUCTION_STYLE + _FACTS_ONLY + """
+- "notes": لو حاجة مهمة ناقصة (مثلاً مفيش أسعار، أو السياسات فاضية)، قولها هنا بدل ما تخترعها."""
+
+    result = _ask_json(prompt, max_tokens=3500, model=AUTOFILL_MODEL, think=True)
+    if result.get("error"):
+        return result
+
+    # تنضيف وتحديد — الـ AI مابيلتزمش بالحدود دايماً
+    rules = []
+    for r in (result.get("smart_rules") or []):
+        if not isinstance(r, dict):
+            continue
+        text = str(r.get("text") or "").strip()[:600]
+        cat = r.get("category") if r.get("category") in SMART_RULE_CATEGORIES else "custom"
+        if text:
+            rules.append({"category": cat, "text": text})
+        if len(rules) >= AUTOFILL_MAX_RULES:   # الحد بعد شيل الفاضي، مش قبله
+            break
+    result["smart_rules"] = rules
+    try:
+        result["bot_age"] = max(18, min(60, int(result.get("bot_age") or 28)))
+    except (TypeError, ValueError):
+        result["bot_age"] = 28
+    for k, limit in (("bot_name", 80), ("tone", 200)):
+        result[k] = str(result.get(k) or "").strip()[:limit]
+    for k in ("forbidden_words", "forbidden_openers", "notes"):
+        v = result.get(k) or []
+        result[k] = [str(x).strip() for x in v if str(x).strip()] if isinstance(v, list) else []
     return result
