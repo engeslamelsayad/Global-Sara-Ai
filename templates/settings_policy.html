@@ -8,10 +8,10 @@
 
 <form method="POST" class="card">
   <label>طريقة الدفع</label>
-  <input type="text" name="payment_method" value="{{ policy.payment_method }}">
+  <input type="text" name="payment_method" maxlength="300" value="{{ policy.payment_method }}">
 
   <label>مدة التوصيل</label>
-  <input type="text" name="delivery_days" value="{{ policy.delivery_days }}">
+  <input type="text" name="delivery_days" maxlength="300" value="{{ policy.delivery_days }}">
 
   <label>سياسة الاسترجاع</label>
   <textarea name="return_policy">{{ policy.return_policy }}</textarea>

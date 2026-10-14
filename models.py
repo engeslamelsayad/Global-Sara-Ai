@@ -372,8 +372,8 @@ class Policy(db.Model):
     id            = db.Column(db.String(36), primary_key=True, default=gen_uuid)
     tenant_id     = db.Column(db.String(36), db.ForeignKey("tenants.id"), nullable=False, unique=True)
 
-    payment_method     = db.Column(db.String(120), default="الدفع عند الاستلام (COD)")
-    delivery_days      = db.Column(db.String(60),  default="1 إلى 3 أيام عمل")
+    payment_method     = db.Column(db.String(300), default="الدفع عند الاستلام (COD)")
+    delivery_days      = db.Column(db.String(300), default="1 إلى 3 أيام عمل")
     return_policy       = db.Column(db.Text, default="الاستبدال والاسترجاع متاح ومضمون")
     exchange_policy      = db.Column(db.Text, default="استبدال خلال 14 يوم من الاستلام")
     inspection_policy    = db.Column(db.Text, default="العميل يعاين المنتج بصرياً قبل الدفع")
