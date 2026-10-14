@@ -21,6 +21,8 @@ model_catalog.py — النماذج المتاحة للرد على العملا�
 ⚠️ الأسعار ممكن تتغير — راجع claude.com/pricing قبل أي قرار تسعير مهم.
 """
 
+import math
+
 # ═══ ثوابت الاستهلاك (مقيسة من الكود) ═══
 # (اتقاسوا على Haiku 4.5 — مضروبين في 1.3 عشان الـ tokenizer الجديد بتاع جيل 5.5)
 TOKENIZER_FACTOR = 1.3
@@ -85,8 +87,14 @@ def request_kwargs(model_id, max_tokens, think=False):
         (Haiku: disabled · Sonnet: between_tools — الـ disabled بيرجّع 400 عليه)
         و Opus 5.5 مابيتقفلش أصلاً → effort low + هامش tokens.
       - think=True (تحليلات عميقة زي مدرّب المبيعات): adaptive + هامش tokens.
+
+    وكمان max_tokens بيتضرب في TOKENIZER_FACTOR على جيل 5.5: نفس طول الرد
+    بقى ~30% tokens أكتر، فحد 600 القديم كان هيقطع ردود كانت بتعدّي عادي.
+    ده سقف مش تكلفة — بتدفع على اللي اتولّد فعلاً بس.
     """
     m = (model_id or "").strip()
+    if m.startswith(("claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5")):
+        max_tokens = math.ceil(max_tokens * TOKENIZER_FACTOR)
     if m.startswith("claude-haiku-5-5"):
         if think:
             return {"max_tokens": max_tokens + THINK_HEADROOM,
