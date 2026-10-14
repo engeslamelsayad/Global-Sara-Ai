@@ -616,8 +616,9 @@ def settings_policy():
     policy = tenant.policy
 
     if request.method == "POST":
-        policy.payment_method  = request.form.get("payment_method", "").strip()
-        policy.delivery_days   = request.form.get("delivery_days", "").strip()
+        # قص للحد الأقصى للعمود — نص أطول كان بيوقّع الصفحة بـ 500
+        policy.payment_method  = (request.form.get("payment_method", "") or "").strip()[:300]
+        policy.delivery_days   = (request.form.get("delivery_days", "") or "").strip()[:300]
         policy.return_policy    = request.form.get("return_policy", "").strip()
         policy.exchange_policy  = request.form.get("exchange_policy", "").strip()
         policy.inspection_policy = request.form.get("inspection_policy", "").strip()
@@ -625,7 +626,13 @@ def settings_policy():
         policy.enable_chronic_disease_warning = bool(request.form.get("enable_chronic_disease_warning"))
         policy.enable_followup  = bool(request.form.get("enable_followup"))
         policy.enable_installments = bool(request.form.get("enable_installments"))
-        db.session.commit()
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            print(f"⚠️ settings_policy save error: {e}")
+            flash("حصل خطأ أثناء حفظ السياسات — جرّب تختصر النصوص الطويلة وحاول تاني", "error")
+            return redirect(url_for("dashboard.settings_policy"))
         _invalidate(tenant)
         flash("تم تحديث السياسات ✅", "success")
         return redirect(url_for("dashboard.settings_policy"))

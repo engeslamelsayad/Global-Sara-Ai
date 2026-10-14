@@ -121,6 +121,16 @@ def run(flask_app=None):
         else:
             print("  ⏭  SQLite — مافيش حد على طول النص")
 
+        print("\n=== 1د-2. توسيع أعمدة السياسات (مدة التوصيل / طريقة الدفع) ===")
+        # سبب 500 عند حفظ السياسات (أكتوبر 2026): التاجر كتب مدة توصيل أطول من VARCHAR(60)
+        if is_pg:
+            for col in ("delivery_days", "payment_method"):
+                ok_all &= safe_alter(conn,
+                    f"ALTER TABLE policies ALTER COLUMN {col} TYPE VARCHAR(300)",
+                    f"policies.{col} → VARCHAR(300)")
+        else:
+            print("  ⏭  SQLite — مافيش حد على طول النص")
+
         print("\n=== 2. جدول products (الحقول الجديدة) ===")
         for col, typ in [
             ("features",         "TEXT"),
