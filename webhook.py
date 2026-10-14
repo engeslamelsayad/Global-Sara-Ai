@@ -11,7 +11,7 @@ from flask import Blueprint, request, jsonify
 
 from bot_engine import (
     get_tenant_for_page, buffer_message, handle_echo, is_closing_reaction,
-    note_customer_message,
+    note_customer_message, log_text,
     download_meta_image, send_message, capture_ad_referral,
 )
 
@@ -126,7 +126,7 @@ def receive_message():
                     print(f"👍 Closing reaction ignored from {sender_id}")
                     continue
 
-                print(f"💬 [{page_id}/{platform}] {sender_id}: {user_message[:60]} → buffering")
+                print(f"💬 [{page_id}/{platform}] {sender_id}: {log_text(user_message)} → buffering")
 
                 # ── تجميع الرسائل (debounce بمدة الـ tenant الخاصة) ──
                 buffer_message(bundle, sender_id, user_message, page_id, platform,

@@ -675,6 +675,26 @@ _SHORT_KW_LEN = 6
 _AR_WORD = r"[\u0621-\u064A\u0660-\u0669a-zA-Z]"
 
 
+# ── نص المحادثة في الـ logs (لمراجعة ردود البوت من Railway) ──
+# أرقام الموبايل بتتخفى (آخر رقمين بس) — logs Railway مش مكان لبيانات العملاء.
+# أي رقم 7 خانات أو أكتر (إنجليزي/عربي، بمسافات أو شرط) = موبايل؛ الأسعار أقصر.
+import re as _re_log
+_PHONE_RE = _re_log.compile(r"\+?[0-9٠-٩۰-۹](?:[\s\-]?[0-9٠-٩۰-۹]){6,}")
+LOG_TEXT_LIMIT = 300
+
+
+def _mask_phone(m):
+    digits = [c for c in m.group(0) if c.isdigit()]
+    return "📵***" + "".join(digits[-2:])
+
+
+def log_text(text, limit=LOG_TEXT_LIMIT):
+    """نص آمن للـ log: الأرقام الطويلة متخفية، سطر واحد، ومقصوص لحد limit."""
+    t = _PHONE_RE.sub(_mask_phone, str(text or ""))
+    t = t.replace("\r", " ").replace("\n", " ⏎ ")
+    return t if len(t) <= limit else t[:limit] + "…"
+
+
 # رفض صريح قصير («لا» ومرادفاتها في اللهجات) — الرسالة كلها لازم تكون رفض.
 # مش keywords تاجر (مش في default_keywords.py): ده منطق محرك بيعدّ محاولات الإغلاق.
 _REFUSALS = {
@@ -784,7 +804,7 @@ def get_ai_response(bundle, sender_id, user_message, state,
                     image_b64=None, image_media_type="image/jpeg"):
     # ── 🔒 حماية: رصد محاولات كشف الـ prompt قبل ما توصل للـ AI ──
     if _is_prompt_extraction_attempt(user_message):
-        print(f"🔒 Prompt-extraction attempt blocked: {sender_id} — {user_message[:60]}")
+        print(f"🔒 Prompt-extraction attempt blocked: {sender_id} — {log_text(user_message, 100)}")
         safe = _safe_leak_reply(bundle)
         state["history"] = (state.get("history", []) + [
             {"role": "user", "content": user_message},
@@ -1669,6 +1689,7 @@ def do_process_message(tenant_id, sender_id, user_message, page_id, platform,
         save_state(tenant_id, sender_id, state)
         return
     send_message(bundle, sender_id, reply, page_id, platform)
+    print(f"🤖 [{tenant_id[:8]}] {sender_id}: {log_text(reply)}")
 
     if new_order:
         save_order(bundle["tenant"], new_order, page_id)
