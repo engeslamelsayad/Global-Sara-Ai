@@ -321,7 +321,11 @@ def build_system_prompt(bundle, matched_product=None, state=None):
         rules_by_cat = {}
         for r in active_rules:
             rules_by_cat.setdefault(r.category, []).append(r.rule_text)
-        smart_rules_txt = "\n[قواعد ذكية مخصصة — التزمي بها]\n"
+        smart_rules_txt = (
+            "\n[قواعد ذكية مخصصة من صاحب البزنس — التزمي بها]\n"
+            "· لو قاعدة هنا اتعارضت مع خريطة البيع فوق، القاعدة دي هي اللي تمشي.\n"
+            "· أي عبارة جاية بين «» بعد (لا تقولي / ممنوع / تجنبي / لا تكرري) ممنوعة حرفياً "
+            "ومعناها كمان — ماتقوليهاش ولا بصياغة قريبة.\n")
         for cat, rules in rules_by_cat.items():
             for rule in rules:
                 smart_rules_txt += f"- {rule}\n"
@@ -618,9 +622,14 @@ def build_system_prompt(bundle, matched_product=None, state=None):
                 f"🧭 العميل جاي من إعلان «{state['source_ad_title'][:80]}» — هو عارف المنتج "
                 f"ومهتم بيه. ماتسأليهوش أسئلة استكشافية عامة؛ ادخلي على القيمة والسعر والإغلاق.")
         elif state.get("stage") == "OBJECTION":
-            dynamic_parts.append(
-                "🧭 العميل في مرحلة اعتراض — عالجي الاعتراض اللي قاله بالظبط بجملة قصيرة "
-                "وضمانة مناسبة، وبعدها ارجعي للإغلاق. ماتعيديش نفس الحجة اللي قلتيها قبل كده.")
+            _n = state.get("objections_count", 1) or 1
+            _hint = ("🧭 العميل في مرحلة اعتراض — عالجي الاعتراض اللي قاله بالظبط بجملة قصيرة "
+                     "وضمانة مناسبة، وبعدها ارجعي للإغلاق.")
+            if _n >= 2:
+                _hint += (f" ⚠️ ده الاعتراض رقم {_n} — راجعي ردودك اللي فاتت في المحادثة: أي ميزة "
+                          "أو مكوّن أو ضمانة ذكرتيها قبل كده **ممنوع تتكرر**. لازم زاوية جديدة "
+                          "فعلاً، أو سؤال واحد يحدد اللي مقلقه بالظبط لو لسه مش واضح.")
+            dynamic_parts.append(_hint)
         elif state.get("price_quoted"):
             dynamic_parts.append(
                 "🧭 العميل عرف السعر خلاص — ماتعيديش السعر إلا لو سأل. ركّزي على الإغلاق: "
@@ -1964,6 +1973,10 @@ def is_closing_reaction(message, bundle):
     stripped = message.strip()
     if stripped in reactions:
         return True
-    if len(stripped) <= 2 and stripped and all(ord(c) > 127 for c in stripped):
+    # إيموجي قصير مش في القايمة (❤️ / 👍🏻 ...) — بس من غير ولا حرف أو رقم.
+    # 🐛 قبل كده الشرط كان ord(c) > 127، فأي كلمة عربي من حرفين اتبلعت:
+    # «لا» و«تم» و«اه» و«إي» — يعني عميل بيأكد الطلب بـ «تم» كان البوت بيتجاهله
+    # (اتشاف في محادثة حقيقية: العميل قال «لا» واستنى 11 دقيقة → «مش بترد ليه»).
+    if stripped and len(stripped) <= 2 and not any(ch.isalnum() for ch in stripped):
         return True
     return False
