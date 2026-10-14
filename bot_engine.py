@@ -302,8 +302,9 @@ def build_system_prompt(bundle, matched_product=None, state=None):
     forbidden_openers = json.loads(bc.forbidden_openers or "[]")
 
     products_count = len(products)
+    currency = getattr(tenant, "currency", None) or "جنيه"
     products_block = "\n".join(
-        f"- {p.name}: {p.price_note or f'{p.price_amount} ج'}"
+        f"- {p.name}: {_display_price(p, currency) or 'السعر غير محدد'}"
         for p in products
     ) or "لا توجد منتجات مُضافة بعد"
 
@@ -402,10 +403,10 @@ def build_system_prompt(bundle, matched_product=None, state=None):
 - لا تستخدمي * أو ** أو markdown
 {"- يمكنك استخدام إيموجي بشكل معتدل (واحد أو اتنين في الرد، مش أكتر)" if bc.use_emojis else "- ممنوع استخدام أي إيموجي"}
 
-أمثلة على الطول الصح (المحتوى للتوضيح — صيغيه بلهجتك):
-- عميل: "بكام؟" → رد من سطر واحد: قيمة قصيرة + السعر + سؤال إغلاق
-- عميل: "متوفر؟" → رد من سطر: أيوه متوفر + سؤال
-- عميل: "إيه الفرق بين النوعين وأنهي أنسب لأوضتي؟" → هنا بس تفصّلي شوية
+أمثلة على الطول الصح (موصوفة بالمعنى — الصياغة دايماً بلهجة {bc.dialect}):
+- العميل سأل عن السعر → سطر واحد: قيمة قصيرة + السعر + سؤال إغلاق
+- العميل سأل لو المنتج متوفر → سطر واحد: تأكيد التوفر + سؤال
+- العميل طلب مقارنة بين منتجين وأنهي أنسب لاستخدامه → هنا بس تفصّلي شوية
 {_playbook}
 
 [سياسات الشركة الثابتة]
@@ -443,7 +444,7 @@ def build_system_prompt(bundle, matched_product=None, state=None):
 دي **المادة** اللي تردي بيها، والتوقيت والتكتيك في قسم الاعتراضات فوق:
 "غالي": {bc.objection_expensive_response or "اشرحي القيمة مقابل السعر"}
 "مش متأكد": {bc.objection_unsure_response or "اطمنيه بالضمان"}
-"هفكر": {bc.objection_later_response or "أكدي محدودية الكمية"}
+"هفكر": {bc.objection_later_response or "اسأليه بالظبط إيه اللي محتاج يفكر فيه، وطمنيه بضمانات الشراء"}
 استخدميها كأفكار تعيدي صياغتها بلهجتك وباختصار — مش نص تنقليه حرفياً.
 
 [بيانات التواصل]
@@ -480,6 +481,13 @@ def build_system_prompt(bundle, matched_product=None, state=None):
 
 [قائمة المنتجات — للرجوع الداخلي فقط، مش للعرض على العميل]
 {products_block}
+
+[🧾 لحظة الطلب — قلّلي الخطوات]
+- أول ما العميل يوافق: اطلبي **كل** البيانات الناقصة في رسالة واحدة (مش واحدة واحدة)
+  — كل رسالة زيادة فرصة إن العميل يختفي قبل ما يكمّل.
+- لما الطلب يتسجل: أكدي في نفس الرسالة باختصار المنتج + السعر النهائي + مدة التوصيل
+  وإن الدفع عند الاستلام (لو ده نظامنا). التأكيد الواضح بيقلل رفض الأوردر عند التسليم.
+- بعد التأكيد ماتفتحيش بيع جديد إلا لو العميل هو اللي سأل.
 
 [تسجيل الطلب]
 لما تتأكدي من الاسم والموبايل والعنوان والمنتج، حطي في آخر ردك:
@@ -531,7 +539,9 @@ def build_system_prompt(bundle, matched_product=None, state=None):
             f"⚠️ المنتج المقصود في رسالة العميل الحالية:\n"
             f"الاسم: {matched_product.name}\n"
             f"الوصف: {matched_product.description or ''}\n"
-            f"السعر الدقيق: {matched_product.price_note} — استخدمي هذا السعر فقط.\n"
+            + (f"السعر الدقيق: {_display_price(matched_product, currency)} — استخدمي هذا السعر فقط.\n"
+               if _display_price(matched_product, currency) else
+               "السعر: غير مسجّل — ماتخترعيش رقم، قولي إنك هتأكديه وحوّلي للرقم الرسمي.\n")
         )
         if features_txt:
             prod_block += f"المميزات الرئيسية:\n{features_txt}\n"
@@ -567,7 +577,9 @@ def build_system_prompt(bundle, matched_product=None, state=None):
                     "لو ذكر وجه/جفن/إبط/منطقة تناسلية أو شرجية: ارفضي البيع بأدب وانصحي بطبيب."
                 )
     else:
-        dynamic_parts.append("لم يتم تحديد منتج بعد — اسألي العميل عن مشكلته أولاً.")
+        dynamic_parts.append(
+            "لم يتم تحديد منتج بعد — اسألي سؤال استكشاف واحد مناسب لنوع البزنس "
+            "(زي ما في قسم سؤال الاستكشاف) عشان ترشحي الأنسب.")
 
     if policy and policy.enable_chronic_disease_warning:
         dynamic_parts.append(
@@ -585,6 +597,21 @@ def build_system_prompt(bundle, matched_product=None, state=None):
             f"هذا العميل لديه خصم {state['has_discount']}% من رسالة متابعة سابقة — "
             f"أضيفي |DISCOUNT{state['has_discount']} عند تسجيل الطلب."
         )
+
+    # ── 🧭 العميل فين في رحلة الشراء (من الـ state — الموديل مايعرفهاش لوحده) ──
+    if state and not state.get("has_order"):
+        if state.get("source_ad_title") and state.get("messages_count", 0) <= 2:
+            dynamic_parts.append(
+                f"🧭 العميل جاي من إعلان «{state['source_ad_title'][:80]}» — هو عارف المنتج "
+                f"ومهتم بيه. ماتسأليهوش أسئلة استكشافية عامة؛ ادخلي على القيمة والسعر والإغلاق.")
+        elif state.get("stage") == "OBJECTION":
+            dynamic_parts.append(
+                "🧭 العميل في مرحلة اعتراض — عالجي الاعتراض اللي قاله بالظبط بجملة قصيرة "
+                "وضمانة مناسبة، وبعدها ارجعي للإغلاق. ماتعيديش نفس الحجة اللي قلتيها قبل كده.")
+        elif state.get("price_quoted"):
+            dynamic_parts.append(
+                "🧭 العميل عرف السعر خلاص — ماتعيديش السعر إلا لو سأل. ركّزي على الإغلاق: "
+                "اسألي عن التفاصيل اللي تكمّل الطلب أو اعرضي تجهيزه.")
 
     # ── العروض الديناميكية ──
     if state and bc:
@@ -746,6 +773,16 @@ def get_ai_response(bundle, sender_id, user_message, state,
             if not matched_product or not _is_strong_match(user_message, matched_product):
                 matched_product = ad_product
                 print(f"🎯 تفضيل منتج الإعلان: {ad_product.name}")
+
+    # ── منتج السياق: الرسالة مافيهاش اسم منتج ("تمام"، "اطلبه"، "ابعتهولي") ──
+    # من غير ده البوت كان بيتقاله "لم يتم تحديد منتج — اسألي عن مشكلته" في عز
+    # لحظة الإغلاق، وبيخسر السعر الدقيق، والـ upsell بعد الطلب مابيشتغلش.
+    # نرجع لآخر منتج العميل اتكلم عنه (أو منتج الإعلان اللي جه منه).
+    if not matched_product:
+        for _key in reversed(([ad_key] if ad_key else []) + state.get("products_asked", [])):
+            matched_product = next((p for p in products if p.product_key == _key), None)
+            if matched_product:
+                break
 
     system_blocks   = build_system_prompt(bundle, matched_product, state)
 
