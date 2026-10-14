@@ -26,7 +26,13 @@
   .sidebar{
     width:240px; background:var(--surface); border-left:1px solid var(--border);
     padding:24px 16px; position:sticky; top:0; height:100vh; flex-shrink:0;
+    /* اللينكات أطول من الشاشة → السايدبار يسكرول لوحده (من غيرها اللينكات
+       اللي تحت كانت بتطلع برا الخلفية أو ماتتوصلش في الصفحات الطويلة) */
+    overflow-y:auto; overscroll-behavior:contain;
+    scrollbar-width:thin; scrollbar-color:var(--border) transparent;
   }
+  .sidebar::-webkit-scrollbar{width:6px}
+  .sidebar::-webkit-scrollbar-thumb{background:var(--border); border-radius:3px}
   .brand{font-size:20px; font-weight:900; color:var(--primary-dark); margin-bottom:4px}
   .brand-sub{font-size:12px; color:var(--text-soft); margin-bottom:28px}
   .nav-section{font-size:11px; color:var(--text-soft); font-weight:700; margin:18px 8px 8px; letter-spacing:.5px}
@@ -186,6 +192,13 @@
   <a class="logout-link {{ 'active' if request.endpoint=='dashboard.profile' }}" href="{{ url_for('dashboard.profile') }}" style="color:var(--text-soft)">⚙ الإعدادات الشخصية</a>
   <a class="logout-link" href="{{ url_for('auth.logout') }}">↩ تسجيل الخروج</a>
 </nav>
+<script>
+  // الصفحة المفتوحة لو تحت في القايمة (القواعد الذكية، المتابعة...) — نخلي لينكها ظاهر
+  (function () {
+    var a = document.querySelector('.sidebar .nav-link.active');
+    if (a) a.scrollIntoView({block: 'nearest'});
+  })();
+</script>
 {% endif %}
 
 <main class="main">
