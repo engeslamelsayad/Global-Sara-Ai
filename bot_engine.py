@@ -688,6 +688,18 @@ def build_system_prompt(bundle, matched_product=None, state=None):
             if _fp:
                 dynamic_parts.append(_fp)
 
+    # ── 📸 صور المنتج: الكود بيبعتها بعد الرد — الموديل لازم يعرف عشان مايقولش «ماعنديش صورة» ──
+    if state and matched_product and _image_list(matched_product):
+        if state.get("photo_request"):
+            dynamic_parts.append(
+                "📸 العميل طلب صورة — النظام هيبعتله صور المنتج تلقائياً بعد ردك مباشرةً. "
+                "قوليله في جملة قصيرة إنك بعتيله الصور، وكمّلي على طول بخطوة الطلب. "
+                "من غير روابط، ومن غير ما تقولي إن مفيش صور.")
+        else:
+            dynamic_parts.append(
+                "📸 المنتج ده له صور، والنظام بيبعت صورته للعميل تلقائياً. لو سأل عن صور "
+                "أو شكل المنتج: الصور وصلاه/هتوصله — ماتقوليش إن مفيش صورة.")
+
     # ── العروض الديناميكية ──
     if state and bc:
         # 1) خصم التردد: العميل اعترض أكتر من مرة → اعرضي خصم لإنقاذ البيعة
@@ -784,6 +796,30 @@ _SOFT_EXIT_STARTS = ("شكرا", "مشكور", "تسلم", "يسلمو", "بار
 _SOFT_EXIT_WORDS = ("خليني نشوف", "خليني انشوف", "نزيد نشوف", "انزيد انشوف", "نشوف ونرد",
                     "نشوف وانرد", "نشوف بعدين", "نفكر فيها", "انفكر فيها", "نرد عليك",
                     "نرجعلك", "نرجع لك", "مرة اخري", "مره اخري")
+
+
+# من logs 20 أكتوبر: «السعر وصورة له»، «صورة له»، «صورة اخي ممكن» — البوت قال
+# «ما عنديش صورة أبعثها» وبعدها بثواني الكود بعت صورة المنتج (الموديل مايعرفش).
+# ولو العميل طلب تاني مكانش بيتبعت حاجة (الصورة بتتبعت مرة لكل منتج).
+_PHOTO_WORDS = ("صوره", "صور", "الصور", "الصوره", "صورته", "صوره له", "تصوير", "فيديو")
+_PHOTO_ASK = ("ابعت", "ابعث", "بعت", "ارسل", "رسل", "وريني", "ورني", "ممكن", "عايز", "عاوز",
+              "ابي", "نبي", "بدي", "ابغي", "عندك", "عندكم", "شوف", "نشوف", "اشوف",
+              "حقيقيه", "حقيقي", "زياده", "اكتر", "اكثر", "تانيه", "ثانيه", "له", "ليه")
+
+
+def is_photo_request(message):
+    """True لو العميل بيطلب صورة المنتج (مش لما هو بيبعت صورة أو بيوصفها)."""
+    import re as _re
+    raw = (message or "").strip()
+    if not raw or raw == "[صورة]":
+        return False
+    t = _re.sub(r"[^\w\s]", " ", _normalize_ar(raw))
+    words = [w[1:] if w.startswith("و") and len(w) > 3 else w for w in t.split()]
+    photo = {_normalize_ar(w) for w in _PHOTO_WORDS}
+    if not any(w in photo or w.startswith(_normalize_ar("صور")) for w in words):
+        return False
+    ask = {_normalize_ar(w) for w in _PHOTO_ASK}
+    return len(words) <= 3 or any(w in ask for w in words) or "؟" in raw or "?" in raw
 
 
 def is_soft_exit(message):
@@ -923,6 +959,8 @@ def get_ai_response(bundle, sender_id, user_message, state,
             matched_product = next((p for p in products if p.product_key == _key), None)
             if matched_product:
                 break
+
+    state["photo_request"] = bool(not image_b64 and is_photo_request(user_message))
 
     # ⚠️ تحديث المرحلة (اهتمام / اعتراض / رفض) لازم يحصل **قبل** بناء البرومبت —
     # تلميحات الرحلة وعرض إنقاذ البيعة بيقروا الـ state، ولو اتحدّث بعد الرد
@@ -1495,6 +1533,20 @@ def _telegram_alert(tenant, text):
         print(f"⚠️ Telegram alert error: {e}")
 
 
+PHOTOS_PER_REQUEST = 3
+
+
+def _image_list(product):
+    """روابط صور المنتج (مفصولة بفاصلة أو سطر جديد) من غير تكرار."""
+    import re as _re
+    out = []
+    for u in _re.split(r"[,\n]", getattr(product, "image_urls", None) or ""):
+        u = u.strip()
+        if u.startswith("http") and u not in out:
+            out.append(u)
+    return out
+
+
 def send_image(bundle, sender_id, image_url, page_id, platform):
     """يبعت صورة للعميل عبر Meta attachment API — بيرجع True لو نجح"""
     page = bundle["pages"].get(page_id)
@@ -2024,15 +2076,29 @@ def do_process_message(tenant_id, sender_id, user_message, page_id, platform,
                 state["upsell_sent"] = True
                 print(f"🎁 Upsell offered: {cross_prod.product_key}")
 
-    # ── صورة المنتج: تتبعت مرة واحدة لكل منتج (تقلل خطأ إرسال منتج غلط) ──
-    if matched_product and (matched_product.image_urls or "").strip():
-        if matched_product.product_key not in state.get("images_sent", []):
-            first_img = matched_product.image_urls.split(",")[0].strip()
-            if first_img:
-                time.sleep(0.4)
-                if send_image(bundle, sender_id, first_img, page_id, platform):
-                    state.setdefault("images_sent", []).append(matched_product.product_key)
-                    print(f"🖼️ Product image sent: {matched_product.product_key}")
+    # ── صورة المنتج: أول صورة مرة واحدة لكل منتج (تقلل خطأ إرسال منتج غلط)،
+    #    ولو العميل طلب صور: لحد PHOTOS_PER_REQUEST صور (اللي ماتبعتتش الأول) ──
+    _imgs = _image_list(matched_product) if matched_product else []
+    _asked_photo = state.pop("photo_request", False)
+    if _imgs:
+        _pk = matched_product.product_key
+        if _asked_photo:
+            _done = state.setdefault("image_urls_sent", {}).get(_pk, [])
+            _todo = [u for u in _imgs if u not in _done][:PHOTOS_PER_REQUEST] \
+                or _imgs[:PHOTOS_PER_REQUEST]
+        elif _pk not in state.get("images_sent", []):
+            _todo = _imgs[:1]
+        else:
+            _todo = []
+        for _u in _todo:
+            time.sleep(0.4)
+            if send_image(bundle, sender_id, _u, page_id, platform):
+                if _pk not in state.setdefault("images_sent", []):
+                    state["images_sent"].append(_pk)
+                _sent = state.setdefault("image_urls_sent", {}).setdefault(_pk, [])
+                if _u not in _sent:
+                    _sent.append(_u)
+                print(f"🖼️ Product image sent: {_pk}" + (" (طلب العميل)" if _asked_photo else ""))
 
     if matched_product and matched_product.product_link:
         if matched_product.product_key not in state.get("links_sent", []):
