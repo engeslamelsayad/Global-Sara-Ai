@@ -167,6 +167,7 @@ def test_followups_respect_23h_window(tenant, monkeypatch):
                         lambda p: {"products": [], "bot_config": None})
     monkeypatch.setattr(bot_engine, "send_message", lambda b, sid, msg, *a: sent.append(sid))
     monkeypatch.setattr(bot_engine, "save_state", lambda *a: None)
+    monkeypatch.setattr(recovery, "is_quiet_hours", lambda d, now=None: False)
     recovery.run_followups(app)
     assert sent == ["fresh"]
     assert states[0][1]["followup_stages_sent"] == [2]
@@ -175,3 +176,75 @@ def test_followups_respect_23h_window(tenant, monkeypatch):
 def test_default_stages_fit_window():
     import default_keywords
     assert sum(h for _, h, _ in default_keywords.DEFAULT_FOLLOWUP_STAGES) < recovery.WINDOW_HOURS
+
+
+# ── 21 أكتوبر: سؤال آه/لا للإغلاق + وعد «الموظف يتابع» + ساعات الهدوء ──
+
+A = types.SimpleNamespace(sales_style="assertive", offer_hesitation_percent=None)
+CREAM = types.SimpleNamespace(name="كريم", price_note="159 بدلا من 195", price_amount=None,
+                              shipping_fee=None)
+
+
+def _kinds(txt, style=A, user="", state=None):
+    return [p[0] for p in bot_engine.reply_problems(txt, [CREAM], "دينار", state or {}, style, user)]
+
+
+def test_yesno_close_flagged():
+    assert _kinds("الكريم بـ 159 دينار بدل 195. تبي نجهزلك عبوة؟") == ["yesno_close"]
+    assert _kinds("تحب تطلبه؟") == ["yesno_close"]
+
+
+@pytest.mark.parametrize("txt", ["السعر 159 دينار. إنت من أي مدينة؟", "تبي نجهزلك عبوة؟ وإنت من وين؟",
+                                 "تحب تطلبه بالبيج ولا الرمادي؟",
+                                 "إذا تبي تكمل الطلب، ابعثلي الاسم ورقم الهاتف"])
+def test_yesno_close_allowed(txt):
+    assert _kinds(txt) == []
+
+
+def test_yesno_close_not_for_calm_or_after_order():
+    assert _kinds("تبي نجهزلك؟", style=types.SimpleNamespace(sales_style="calm")) == []
+    assert _kinds("تبي نجهزلك؟", state={"has_order": True}) == []
+
+
+def test_fake_employee():
+    assert _kinds("ما عنديش صورة، الموظف يتابع معاك هنا.") == ["fake_employee"]
+    assert _kinds("حاضر، الموظف هيتابع معاك", user="ابي نكلم موظف") == []
+    assert _kinds("هتأكد من الفريق وأرجعلك [ASK|ألوان الطقم المتوفرة؟]") == []
+
+
+def test_yesno_kept_employee_dropped_when_retry_fails():
+    txt = "السعر 159 دينار. تبي نجهزلك عبوة؟ الموظف يتابع معاك."
+    probs = bot_engine.reply_problems(txt, [CREAM], "دينار", {}, A)
+    assert bot_engine._drop_bad_sentences(txt, probs) == "السعر 159 دينار. تبي نجهزلك عبوة؟"
+
+
+def test_quiet_hours_by_dialect():
+    midnight_utc = 1792540800 - 1792540800 % 86400          # 00:00 UTC
+    assert recovery.is_quiet_hours("ليبي", midnight_utc + 0 * 3600)       # 2 الصبح ليبيا
+    assert not recovery.is_quiet_hours("ليبي", midnight_utc + 8 * 3600)   # 10 الصبح ليبيا
+    assert recovery.is_quiet_hours("خليجي", midnight_utc + 5 * 3600)      # 8 الصبح السعودية
+    assert not recovery.is_quiet_hours("خليجي", midnight_utc + 6 * 3600)
+
+
+def test_followups_wait_in_quiet_hours(tenant, monkeypatch):
+    app, tid = tenant
+    sent = []
+    with app.app_context():
+        FollowupStage.query.filter_by(tenant_id=tid).delete()
+        db.session.add(FollowupStage(tenant_id=tid, stage_number=1, hours_after_last=3,
+                                     discount_percent=0, message_text="", is_active=True))
+        db.session.commit()
+    monkeypatch.setattr(bot_engine, "list_tenant_states_with_ids",
+                        lambda t: [("q", {"page_id": "P", "history": [1],
+                                          "last_message": time.time() - 5 * 3600})]
+                        if t == tid else [])
+    monkeypatch.setattr(bot_engine, "get_tenant_for_page",
+                        lambda p: {"products": [], "bot_config": None})
+    monkeypatch.setattr(bot_engine, "send_message", lambda b, sid, *a: sent.append(sid))
+    monkeypatch.setattr(bot_engine, "save_state", lambda *a: None)
+    monkeypatch.setattr(recovery, "is_quiet_hours", lambda d, now=None: True)
+    recovery.run_followups(app)
+    assert sent == []
+    monkeypatch.setattr(recovery, "is_quiet_hours", lambda d, now=None: False)
+    recovery.run_followups(app)
+    assert sent == ["q"]

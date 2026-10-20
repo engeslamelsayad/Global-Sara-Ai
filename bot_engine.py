@@ -1074,9 +1074,9 @@ def get_ai_response(bundle, sender_id, user_message, state,
         # مانبعتش رسالة فاضية للعميل، نسيبها لـ _handle_ai_failure
         raise RuntimeError(f"AI returned no text (stop_reason={response_obj.stop_reason})")
 
-    # ── 🛡️ حارس الرد: سعر مش موجود / عملة غلط / «سجلت طلبك» من غير طلب ──
+    # ── 🛡️ حارس الرد: سعر/عملة غلط، «سجلت طلبك» من غير طلب، سؤال آه/لا للإغلاق، وعد «الموظف يتابع» ──
     _cur = getattr(bundle["tenant"], "currency", None) or "جنيه"
-    _problems = reply_problems(response_text, products, _cur, state, bc)
+    _problems = reply_problems(response_text, products, _cur, state, bc, user_message)
     if _problems:
         print(f"🛡️ رد فيه مشكلة لـ {sender_id}: {[p[0] for p in _problems]} — بنعيد الرد مرة")
         _fix = ("⛔ تصحيح إجباري للرد اللي جاي — المسودة اللي فاتت كان فيها غلط:\n"
@@ -1095,7 +1095,7 @@ def get_ai_response(bundle, sender_id, user_message, state,
                 response_text = _txt
         except Exception as e:
             print(f"⚠️ guard retry failed: {e}")
-        _left = reply_problems(response_text, products, _cur, state, bc)
+        _left = reply_problems(response_text, products, _cur, state, bc, user_message)
         if _left:
             response_text = _drop_bad_sentences(response_text, _left)
             print(f"🛡️ لسه فيه مشكلة بعد الإعادة — شلنا الجملة: {[p[0] for p in _left]}")
@@ -1337,7 +1337,17 @@ def _price_list(products, currency):
     return "، ".join(f"{p.name}: {_display_price(p, currency) or '—'}" for p in products) or "—"
 
 
-def reply_problems(text, products, currency, state=None, bc=None):
+# من logs 20 أكتوبر (بعد ما EASY_CLOSE اتحط في البرومبت): Haiku لسه بيقفل بـ «تبي نجهزلك عبوة؟»،
+# وبيوعد «الموظف يتابع معاك هنا» من غير ما العميل يطلب موظف ومحدش بيتابع.
+_YESNO_RE = None
+_EMPLOYEE_RE = None
+_HUMAN_ASK = ("موظف", "بشري", "انسان", "مسؤول", "مسئول", "ادارة", "اداره", "مدير", "حد يكلمني",
+              "اكلم حد", "نكلم حد")
+# مش بتتشال لو الإعادة فشلت (شيلها بيسيب الرد من غير إغلاق) — بتتسجّل في الـ log بس
+_KEEP_ON_FAIL = ("yesno_close",)
+
+
+def reply_problems(text, products, currency, state=None, bc=None, user_message=""):
     """[(نوع، شرح، النص الغلط)] — فاضية = الرد سليم."""
     import re as _re
     global _PRICE_RE, _FAKE_ORDER_RE
@@ -1363,13 +1373,43 @@ def reply_problems(text, products, currency, state=None, bc=None):
         out.append(("fake_order", "قلتي إن الطلب اتسجل، والطلب ماتسجلش (مفيش اسم وموبايل وعنوان "
                     "ومفيش [ORDER|...]). اطلبي البيانات الناقصة بدل كده.",
                     _FAKE_ORDER_RE.search(text).group(0)))
+
+    import questions
+    import sales_playbook
+    global _YESNO_RE, _EMPLOYEE_RE
+    if _YESNO_RE is None:
+        _YESNO_RE = _re.compile(
+            r"(تبي|تبغي|تبغى|تحب|تحبي|حابب|حابة|بدك|تريد|تريدي|عايز|عايزة|تود)\s+(ان\s+|أن\s+)?"
+            r"(نجهز|نجهزلك|نجهزهولك|نجهزهالك|نسجل|نسجلك|نسجّل|نسجّلك|نكمل|نكمّل|تكمل|تكمّل|تطلب|تطلبه|"
+            r"تطلبها|تاخذ|تاخد|نبعث|نبعت|نرسل|نحجز|نحجزلك)[^؟?\n]{0,40}[؟?]")
+        _EMPLOYEE_RE = _re.compile(
+            r"(الموظف|موظف|موظفة|الموظفة|فريق المتجر|الفريق|زميلي|زميلتي|الإدارة|الادارة|المسؤول)"
+            r"[^.!؟?\n]{0,30}(يتابع|يتواصل|يرد|يكلم|يرجع|راجع|يشوف|يأكد|يتأكد|يساعد|يوضح|هيتابع|حيتابع)")
+    st = state or {}
+    style = getattr(bc, "sales_style", None) if bc else None
+    if (not st.get("has_order") and sales_playbook._norm(style) != "calm"):
+        m = _YESNO_RE.search(text or "")
+        # سؤال اختيار («تحب تطلبه بالبيج ولا الرمادي؟») أو معاه سؤال المدينة/البيانات = تمام
+        if (m and not _re.search(r"\s(ولا|أو|او|والا)\s", m.group(0))
+                and not _re.search(r"مدين|وين|فين|منين|اسم|عنوان|رقم", text or "")):
+            out.append(("yesno_close", f"قفلتي بسؤال آه/لا «{m.group(0)}» — ده بيسهّل الرفض. "
+                        "اقفلي بسؤال المدينة بس (العميل من أي مدينة) زي ما في خطوات سلّم الطلب.",
+                        m.group(0)))
+    m = _EMPLOYEE_RE.search(text or "")
+    if (m and not st.get("is_human_handoff") and not questions.ASK_PATTERN.search(text or "")
+            and not any(w in _normalize_ar(user_message or "") for w in
+                        (_normalize_ar(x) for x in _HUMAN_ASK))):
+        out.append(("fake_employee", f"وعدتي «{m.group(0)}» والعميل ماطلبش موظف ومحدش هيتابع. "
+                    "جاوبي من البيانات اللي عندك؛ ولو معلومة ناقصة فعلاً اتبعي تعليمات "
+                    "الأسئلة (لو موجودة) أو قولي بصراحة إنها مش متوفرة عندك، وكمّلي على الطلب.",
+                    m.group(0)))
     return out
 
 
 def _drop_bad_sentences(text, problems):
     """آخر حل: نشيل الجمل اللي فيها الغلط بالظبط ونسيب الباقي."""
     import re as _re
-    bad = [p[2] for p in problems if p[2]]
+    bad = [p[2] for p in problems if p[2] and p[0] not in _KEEP_ON_FAIL]
     parts = _re.split(r"(?<=[.!؟?\n،])\s*", (text or "").translate(_AR_DIGITS))
     raw = _re.split(r"(?<=[.!؟?\n،])\s*", text or "")
     kept = [r for r, n in zip(raw, parts) if not any(b in n or b in r for b in bad)]
