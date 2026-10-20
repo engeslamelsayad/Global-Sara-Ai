@@ -67,6 +67,9 @@
           </form>
         </div>
       </div>
+      {% if s.hours_after_last >= 23 %}
+      <p style="font-size:12px; color:#b91c1c; margin:0 0 6px">⚠️ المرحلة دي مش هتتبعت: Meta بتسمح بالرسايل بس جوه 24 ساعة من آخر رسالة للعميل. خلي التوقيت أقل من 23 ساعة.</p>
+      {% endif %}
       <p style="font-size:13px; color:var(--text-soft); white-space:pre-line">{{ s.message_text }}</p>
     </div>
     {% endfor %}
