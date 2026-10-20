@@ -17,6 +17,11 @@ import time
 # حد أقصى للرسائل في الدورة الواحدة لكل tenant (حماية من الانفجار بعد downtime)
 MAX_SENDS_PER_RUN = 30
 
+# سياسة Meta: رسالة من غير tag مسموحة بس جوه 24 ساعة من آخر رسالة للعميل.
+# بنسيب ساعة هامش. أي مرحلة توقيتها ≥ ده مستحيل تتبعت جوه الشباك فبتتجاهل
+# (من غير ما توقف المراحل اللي بعدها)، وعميل عدّى عليه ده من آخر رسالة ماياخدش متابعة.
+WINDOW_HOURS = 23
+
 
 def _pick_product(state, products):
     """يرجّع آخر منتج سأل عنه العميل (لو موجود)"""
@@ -93,9 +98,10 @@ def run_followups(app):
             # المتابعات شغالة = فيه مرحلة واحدة مفعّلة على الأقل (من صفحة رسائل المتابعة).
             # كان فيه كمان خانة في صفحة السياسات بتوقف الكل — اتشالت لأنها كانت بتلخبط
             # (الصفحة تقول «مفعّل» والمتابعات واقفة). شوف migrate_add_columns خطوة 10ب.
-            stages = (FollowupStage.query
-                      .filter_by(tenant_id=tenant.id, is_active=True)
-                      .order_by(FollowupStage.stage_number).all())
+            stages = [s for s in (FollowupStage.query
+                                  .filter_by(tenant_id=tenant.id, is_active=True)
+                                  .order_by(FollowupStage.stage_number).all())
+                      if (s.hours_after_last or 0) < WINDOW_HOURS]
             if not stages:
                 continue
 
@@ -113,7 +119,7 @@ def run_followups(app):
                     continue
 
                 last_msg = state.get("last_message") or state.get("created_at") or 0
-                if not last_msg:
+                if not last_msg or (now - last_msg) / 3600 >= WINDOW_HOURS:
                     continue
 
                 sent_stages = state.get("followup_stages_sent", [])

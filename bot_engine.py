@@ -539,8 +539,8 @@ def build_system_prompt(bundle, matched_product=None, state=None):
 {products_block}
 
 [🧾 لحظة الطلب — قلّلي الخطوات]
-- أول ما العميل يوافق: اطلبي **كل** البيانات الناقصة في رسالة واحدة (مش واحدة واحدة)
-  — كل رسالة زيادة فرصة إن العميل يختفي قبل ما يكمّل.
+- أول ما العميل يوافق: لو المدينة مش معروفة اسأليه عنها الأول (سؤال سهل)، وبعدها اطلبي
+  الاسم ورقم الموبايل والعنوان **في رسالة واحدة** — ماتقسّميهمش أكتر من كده.
 - لما الطلب يتسجل: أكدي في نفس الرسالة باختصار المنتج + السعر النهائي + مدة التوصيل
   وإن الدفع عند الاستلام (لو ده نظامنا). التأكيد الواضح بيقلل رفض الأوردر عند التسليم.
 - بعد التأكيد ماتفتحيش بيع جديد إلا لو العميل هو اللي سأل.
@@ -673,7 +673,9 @@ def build_system_prompt(bundle, matched_product=None, state=None):
         elif state.get("source_ad_title") and state.get("messages_count", 0) <= 2:
             dynamic_parts.append(
                 f"🧭 العميل جاي من إعلان «{state['source_ad_title'][:80]}» — هو عارف المنتج "
-                f"ومهتم بيه. ماتسأليهوش أسئلة استكشافية عامة؛ ادخلي على القيمة والسعر والإغلاق.")
+                f"ومهتم بيه. ماتسأليهوش أسئلة استكشافية عامة؛ ادخلي على القيمة والسعر والإغلاق."
+                + (" " + sales_playbook.EASY_CLOSE
+                   if getattr(bc, "sales_style", None) != "calm" else ""))
         elif state.get("stage") == "OBJECTION":
             dynamic_parts.append(sales_playbook.objection_hint(
                 getattr(bc, "sales_style", None), state.get("objections_count", 1),
@@ -681,6 +683,10 @@ def build_system_prompt(bundle, matched_product=None, state=None):
                 soft_exit=bool(state.get("last_was_soft_exit"))))
         elif state.get("price_quoted"):
             dynamic_parts.append(sales_playbook.price_hint(getattr(bc, "sales_style", None)))
+        elif matched_product:
+            _fp = sales_playbook.first_price_hint(getattr(bc, "sales_style", None))
+            if _fp:
+                dynamic_parts.append(_fp)
 
     # ── العروض الديناميكية ──
     if state and bc:
@@ -1030,6 +1036,34 @@ def get_ai_response(bundle, sender_id, user_message, state,
         # مانبعتش رسالة فاضية للعميل، نسيبها لـ _handle_ai_failure
         raise RuntimeError(f"AI returned no text (stop_reason={response_obj.stop_reason})")
 
+    # ── 🛡️ حارس الرد: سعر مش موجود / عملة غلط / «سجلت طلبك» من غير طلب ──
+    _cur = getattr(bundle["tenant"], "currency", None) or "جنيه"
+    _problems = reply_problems(response_text, products, _cur, state, bc)
+    if _problems:
+        print(f"🛡️ رد فيه مشكلة لـ {sender_id}: {[p[0] for p in _problems]} — بنعيد الرد مرة")
+        _fix = ("⛔ تصحيح إجباري للرد اللي جاي — المسودة اللي فاتت كان فيها غلط:\n"
+                + "\n".join(f"- {p[1]}" for p in _problems)
+                + f"\nالأسعار الصحيحة بس: {_price_list(products, _cur)}."
+                + "\nاكتبي الرد تاني صح ومن غير ما تذكري إن فيه تصحيح.")
+        try:
+            _retry = client.messages.create(
+                model=_model,
+                system=list(system_blocks) + [{"type": "text", "text": _fix}],
+                messages=messages,
+                **model_catalog.request_kwargs(_model, bc.max_tokens or 600),
+            )
+            _txt = _strip_meta(model_catalog.response_text(_retry))
+            if _txt:
+                response_text = _txt
+        except Exception as e:
+            print(f"⚠️ guard retry failed: {e}")
+        _left = reply_problems(response_text, products, _cur, state, bc)
+        if _left:
+            response_text = _drop_bad_sentences(response_text, _left)
+            print(f"🛡️ لسه فيه مشكلة بعد الإعادة — شلنا الجملة: {[p[0] for p in _left]}")
+            if not response_text:
+                raise RuntimeError("guarded reply became empty")
+
     # ── كشف التصنيفات المخصصة ([LABEL|اسم]) ──
     # الـ AI بيطلعها لما شرط التاجر يتحقق. بنشيلها من الرد (العميل مايشوفهاش)
     # ونسجّلها في الـ state عشان الـ caller يطبّقها على Meta.
@@ -1048,6 +1082,10 @@ def get_ai_response(bundle, sender_id, user_message, state,
     response_text, _asks = questions.extract(response_text)
     if not response_text:
         raise RuntimeError("AI reply was only an [ASK|...] tag")
+    _dropped = [q for q in _asks if not questions.is_store_question(q)]
+    if _dropped:
+        print(f"❓ سؤال موجّه للعميل مش للفريق — مااتبعتش: {_dropped}")
+    _asks = [q for q in _asks if questions.is_store_question(q)]
     if (_asks and state.get("platform") != "demo" and state.get("page_id") != "demo"
             and questions.enabled(bundle["tenant"])):
         for _q in _asks[:2]:
@@ -1219,6 +1257,85 @@ def _strip_meta(text):
     if len(kept) != len(paras):
         print(f"🧹 شلت {len(paras) - len(kept)} فقرة تفكير داخلي من الرد قبل الإرسال")
     return "\n\n".join(kept).strip()
+
+
+# ── 🛡️ حارس الرد (من محادثات حقيقية 20 أكتوبر) ──
+# البوت قال «٢٠٥٠ دينار للطقم» (السعر 199)، وقال «25 دولار» لصفحة شغالة بالدينار،
+# وقال «سجلت طلبك» من غير ما ياخد اسم ولا رقم ولا يكتب [ORDER|...].
+_CURRENCY_WORDS = ("دينار", "جنيه", "ريال", "درهم", "ليرة", "دولار", "شيكل")
+_PRICE_RE = None
+_FAKE_ORDER_RE = None
+
+
+def _price_values(products, state=None, bc=None):
+    """كل الأرقام اللي ينفع تتقال كسعر: أسعار المنتجات وأسعارها القديمة، ومضاعفاتها
+    (كمية)، وبعد الخصومات المعروفة، ومصاريف الشحن."""
+    import re as _re
+    vals, bases = set(), []
+    for p in products:
+        note = (p.price_note or "").translate(_AR_DIGITS)
+        for x in _re.findall(r"\d+(?:\.\d+)?", note):
+            vals.add(float(x))
+            bases.append(float(x))
+        if p.price_amount:
+            vals.add(float(p.price_amount))
+            bases.append(float(p.price_amount))
+        if p.shipping_fee:
+            vals.add(float(p.shipping_fee))
+    pcts = {10, 15, 20}
+    if state and state.get("has_discount"):
+        pcts.add(int(state["has_discount"]))
+    if bc and getattr(bc, "offer_hesitation_percent", None):
+        pcts.add(int(bc.offer_hesitation_percent))
+    for b in bases:
+        for k in range(1, 6):          # كمية لحد 5
+            vals.add(b * k)
+            for pc in pcts:
+                vals.add(round(b * k * (100 - pc) / 100, 2))
+    return vals, (min(bases) if bases else None)
+
+
+def _price_list(products, currency):
+    return "، ".join(f"{p.name}: {_display_price(p, currency) or '—'}" for p in products) or "—"
+
+
+def reply_problems(text, products, currency, state=None, bc=None):
+    """[(نوع، شرح، النص الغلط)] — فاضية = الرد سليم."""
+    import re as _re
+    global _PRICE_RE, _FAKE_ORDER_RE
+    if _PRICE_RE is None:
+        _PRICE_RE = _re.compile(r"(\d+(?:[.,]\d+)?)\s*(" + "|".join(_CURRENCY_WORDS) + r"|\$)")
+        _FAKE_ORDER_RE = _re.compile(
+            r"\b(سج+ّ?لت|سجّلنا|سجلنا|تم تسجيل|اتسج+ّ?ل|تسجّل)\s*(لك\s*|ليك\s*)?(طلبك|الطلب)"
+            r"|\b(طلبك|الطلب)\s*(اتسج+ّ?ل|تسجّل|تم تسجيله)\b")
+    t = (text or "").translate(_AR_DIGITS)
+    t = _re.sub(r"(?<=\d),(?=\d{3}\b)", "", t)      # 2,050 → 2050
+    out = []
+    vals, floor = _price_values(products, state, bc)
+    for m in _PRICE_RE.finditer(t):
+        num, cur = float(m.group(1).replace(",", ".")), m.group(2)
+        if cur != currency and not (cur == "$" and currency == "دولار"):
+            out.append(("currency", f"ذكرتي «{m.group(0)}» — العملة الوحيدة عندنا {currency}.", m.group(0)))
+            continue
+        # أرقام صغيرة (تكلفة في اليوم/للاستخدام) مسموحة؛ الكبيرة لازم تطابق سعر حقيقي
+        if floor and num >= floor * 0.3 and not any(abs(num - v) <= 1 for v in vals):
+            out.append(("price", f"ذكرتي سعر «{m.group(0)}» ومفيش منتج بالسعر ده.", m.group(0)))
+    if (_FAKE_ORDER_RE.search(text or "") and not ORDER_PATTERN.search(text or "")
+            and not (state or {}).get("has_order")):
+        out.append(("fake_order", "قلتي إن الطلب اتسجل، والطلب ماتسجلش (مفيش اسم وموبايل وعنوان "
+                    "ومفيش [ORDER|...]). اطلبي البيانات الناقصة بدل كده.",
+                    _FAKE_ORDER_RE.search(text).group(0)))
+    return out
+
+
+def _drop_bad_sentences(text, problems):
+    """آخر حل: نشيل الجمل اللي فيها الغلط بالظبط ونسيب الباقي."""
+    import re as _re
+    bad = [p[2] for p in problems if p[2]]
+    parts = _re.split(r"(?<=[.!؟?\n،])\s*", (text or "").translate(_AR_DIGITS))
+    raw = _re.split(r"(?<=[.!؟?\n،])\s*", text or "")
+    kept = [r for r, n in zip(raw, parts) if not any(b in n or b in r for b in bad)]
+    return " ".join(x for x in kept if x.strip()).strip()
 
 
 _AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
