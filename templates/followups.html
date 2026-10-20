@@ -6,10 +6,19 @@
   <p class="page-sub">مراحل تلقائية بتتبعت للعميل لو ماردش — تقدر تضيف أي عدد من المراحل</p>
 </div>
 
+{% if not followups_on %}
+<div class="card" style="border:2px solid #ef4444; background:#FEF2F2; margin-bottom:16px">
+  <h3 style="margin-top:0; color:#b91c1c">⛔ المتابعات واقفة دلوقتي — ولا رسالة متابعة بتتبعت</h3>
+  <p style="font-size:14px; line-height:1.9; margin:0">
+    خانة «تفعيل رسائل المتابعة التلقائية» في صفحة السياسات مش متعلّم عليها، ودي بتوقف كل المراحل اللي تحت.
+    <a href="{{ url_for('dashboard.settings_policy') }}">فعّلها من صفحة السياسات ←</a>
+  </p>
+</div>
+{% endif %}
 <!-- بانر الاسترجاع الذكي -->
-<div class="card" style="border:2px solid #10b981; background:linear-gradient(135deg,#F0FDF4,#DCFCE7); margin-bottom:16px">
-  <h3 style="margin-top:0; color:#059669; display:flex; align-items:center; gap:8px">
-    🧠 الاسترجاع الذكي (Smart Recovery) — مفعّل تلقائياً
+<div class="card" style="border:2px solid {{ '#10b981' if followups_on else '#cbd5e1' }}; background:{{ 'linear-gradient(135deg,#F0FDF4,#DCFCE7)' if followups_on else '#F8FAFC' }}; margin-bottom:16px">
+  <h3 style="margin-top:0; color:{{ '#059669' if followups_on else '#64748b' }}; display:flex; align-items:center; gap:8px">
+    🧠 الاسترجاع الذكي (Smart Recovery) — {{ 'مفعّل' if followups_on else 'واقف' }}
   </h3>
   <p style="font-size:14px; line-height:1.9; margin:0">
     المتابعات مبقتش رسالة واحدة للكل — البوت بيحلّل <b>سبب توقف كل عميل</b> ويخصّص الرسالة:

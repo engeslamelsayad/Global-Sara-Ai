@@ -150,6 +150,9 @@
   <a class="nav-link {{ 'active' if request.endpoint and 'product' in request.endpoint }}" href="{{ url_for('dashboard.products_list') }}">
     <span class="nav-icon">📦</span> المنتجات
   </a>
+  <a class="nav-link {{ 'active' if request.endpoint=='dashboard.ads_list' }}" href="{{ url_for('dashboard.ads_list') }}">
+    <span class="nav-icon">📢</span> الإعلانات
+  </a>
 
   <div class="nav-section">إعدادات البوت</div>
   <a class="nav-link {{ 'active' if request.endpoint=='dashboard.settings_general' }}" href="{{ url_for('dashboard.settings_general') }}">
@@ -169,6 +172,9 @@
   </a>
   <a class="nav-link {{ 'active' if request.endpoint=='dashboard.telegram_settings' }}" href="{{ url_for('dashboard.telegram_settings') }}">
     <span class="nav-icon">📊</span> تقارير تليجرام
+  </a>
+  <a class="nav-link {{ 'active' if request.endpoint=='dashboard.telegram_questions' }}" href="{{ url_for('dashboard.telegram_questions') }}">
+    <span class="nav-icon">❓</span> أسئلة تليجرام
   </a>
   <a class="nav-link {{ 'active' if request.endpoint=='dashboard.smart_rules_list' }}" href="{{ url_for('dashboard.smart_rules_list') }}">
     <span class="nav-icon">⚡</span> القواعد الذكية

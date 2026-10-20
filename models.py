@@ -54,6 +54,11 @@ class Tenant(db.Model):
     telegram_chat_id      = db.Column(db.String(60))    # معرّف محادثة التاجر
     telegram_link_code    = db.Column(db.String(20))    # كود مؤقت لربط الحساب
     telegram_enabled      = db.Column(db.Boolean, default=False)
+    # «أسئلة تليجرام»: الشخص اللي بيجاوب على أسئلة العملاء اللي البوت مايعرفهاش
+    # (ممكن يكون غير التاجر اللي بتوصله التقارير) — questions.py
+    questions_chat_id     = db.Column(db.String(60))
+    questions_link_code   = db.Column(db.String(20))
+    questions_contact     = db.Column(db.String(120))   # اسمه على تليجرام (للعرض)
 
     # مدرّب المبيعات — تقرير دوري بتحليل المحادثات
     coach_enabled         = db.Column(db.Boolean, default=True)
@@ -82,6 +87,8 @@ class Tenant(db.Model):
     smart_rules   = db.relationship("SmartRule",      backref="tenant", cascade="all, delete-orphan",
                                      order_by="SmartRule.created_at")
     meta_labels   = db.relationship("MetaLabel",      backref="tenant", cascade="all, delete-orphan")
+    ad_products   = db.relationship("AdProduct",      backref="tenant", cascade="all, delete-orphan")
+    bot_questions = db.relationship("BotQuestion",    backref="tenant", cascade="all, delete-orphan")
 
     def to_dict(self):
         return {
@@ -493,4 +500,82 @@ class MetaLabel(db.Model):
             "id": self.id, "name": self.name,
             "trigger_stage": self.trigger_stage, "is_active": self.is_active,
             "meta_label_ids": _j.loads(self.meta_label_ids or "{}"),
+        }
+
+
+# =====================================================================
+# AD_PRODUCT — ربط إعلان (Click-to-Message) بالمنتج بتاعه
+# =====================================================================
+class AdProduct(db.Model):
+    """
+    الإعلانات بتيجي بعناوين زي «New Sales Ad_Group_1» مابتطابقش أي منتج، فالبوت
+    كان بيسأل «أي منتج؟» لعملاء جايين عشان منتج واحد. الجدول ده بيربط الإعلان
+    (بالـ ad_id، أو العنوان لو مفيش id) بالمنتج.
+
+    mode:
+      auto     — البوت بيتعلم لوحده من عملاء الإعلان (votes) — شوف ads.py
+      manual   — التاجر اختار المنتج من الداشبورد (أعلى أولوية، مابيتغيرش لوحده)
+      conflict — عملاء نفس الإعلان سألوا عن منتجين مختلفين → الربط التلقائي اتوقف
+                 لحد ما التاجر يختار (غالباً حملتين دخلوا على بعض)
+    """
+    __tablename__ = "ad_products"
+    __table_args__ = (UniqueConstraint("tenant_id", "ad_key", name="uq_ad_products_tenant_ad"),)
+
+    id          = db.Column(db.String(36), primary_key=True, default=gen_uuid)
+    tenant_id   = db.Column(db.String(36), db.ForeignKey("tenants.id"), nullable=False, index=True)
+    ad_key      = db.Column(db.String(120), nullable=False)   # ad_id أو "title:<العنوان>"
+    ad_title    = db.Column(db.String(300))
+    product_key = db.Column(db.String(80))                    # None = مش مربوط
+    mode        = db.Column(db.String(12), default="auto")
+    votes       = db.Column(db.Text, default="{}")            # JSON: {product_key: عدد العملاء}
+    voters      = db.Column(db.Text, default="[]")            # JSON: آخر sender_ids اللي صوّتوا
+    hits        = db.Column(db.Integer, default=0)            # عدد العملاء اللي جم من الإعلان
+    last_seen   = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at  = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id, "ad_key": self.ad_key, "ad_title": self.ad_title,
+            "product_key": self.product_key, "mode": self.mode,
+            "votes": json.loads(self.votes or "{}"), "hits": self.hits or 0,
+            "last_seen": self.last_seen.strftime("%Y-%m-%d %H:%M") if self.last_seen else "",
+        }
+
+
+# =====================================================================
+# BOT_QUESTION — «أسئلة تليجرام»: ذاكرة البوت للمعلومات اللي الفريق أكدها
+# =====================================================================
+class BotQuestion(db.Model):
+    """
+    عميل سأل عن معلومة مش في بيانات المنتج (مقاس، لون، خامة…) → البوت بيكتب [ASK|…]،
+    والسؤال بيتبعت على تليجرام للشخص المربوط. ردّه (Reply على الرسالة) بيتحفظ هنا،
+    وبيدخل البرومبت كمعلومة مؤكدة، وبيتبعت للعملاء اللي كانوا مستنيين.
+    التاجر بيراجع/يعدّل/يوقف أي إجابة من صفحة «أسئلة تليجرام».
+
+    status: pending (مستني إجابة) / answered (في ذاكرة البوت) / disabled (موقوف)
+    """
+    __tablename__ = "bot_questions"
+
+    id             = db.Column(db.String(36), primary_key=True, default=gen_uuid)
+    tenant_id      = db.Column(db.String(36), db.ForeignKey("tenants.id"), nullable=False, index=True)
+    question       = db.Column(db.Text, nullable=False)
+    answer         = db.Column(db.Text)
+    product_key    = db.Column(db.String(80))
+    status         = db.Column(db.String(12), default="pending", index=True)
+    source         = db.Column(db.String(12), default="telegram")   # telegram / dashboard
+    askers         = db.Column(db.Text, default="[]")   # JSON: [{psid, page_id, platform, t}] مستنيين الرد
+    times_asked    = db.Column(db.Integer, default=1)
+    tg_chat_id     = db.Column(db.String(60))
+    tg_message_id  = db.Column(db.String(40), index=True)
+    created_at     = db.Column(db.DateTime, default=datetime.utcnow)
+    answered_at    = db.Column(db.DateTime)
+
+    def to_dict(self):
+        return {
+            "id": self.id, "question": self.question, "answer": self.answer or "",
+            "product_key": self.product_key or "", "status": self.status,
+            "source": self.source, "times_asked": self.times_asked or 1,
+            "waiting": len(json.loads(self.askers or "[]")) if self.status == "pending" else 0,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M") if self.created_at else "",
+            "answered_at": self.answered_at.strftime("%Y-%m-%d %H:%M") if self.answered_at else "",
         }
