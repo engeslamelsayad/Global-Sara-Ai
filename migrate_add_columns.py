@@ -353,6 +353,26 @@ def run(flask_app=None):
             db.session.rollback()
             print(f"  ⚠️ coach model upgrade: {e}")
 
+        print("\n=== 10ب. المتابعات: الخانة اتشالت من السياسات — المراحل المفعّلة هي المصدر الوحيد ===")
+        # الحسابات اللي كانت قافلة الخانة عن قصد: نوقف مراحلها مرة واحدة عشان
+        # المتابعات ماتشتغلش عندهم فجأة، ونرجّع الخانة True عشان الخطوة دي ماتتكررش.
+        try:
+            from models import Policy, FollowupStage
+            moved = 0
+            for pol in Policy.query.filter_by(enable_followup=False).all():
+                FollowupStage.query.filter_by(tenant_id=pol.tenant_id, is_active=True) \
+                    .update({"is_active": False})
+                pol.enable_followup = True
+                moved += 1
+            if moved:
+                db.session.commit()
+                print(f"  ✅ {moved} حساب كان قافل المتابعات: مراحله اتوقفت (نفس السلوك)")
+            else:
+                print("  ⏭  مفيش حسابات قافلة المتابعات من السياسات")
+        except Exception as e:
+            db.session.rollback()
+            print(f"  ⚠️ followup toggle migration: {e}")
+
         print("\n=== 10. حملة يوم المرتبات — صف افتراضي لكل tenant ===")
         # الجدول نفسه بيتعمل من db.create_all() (جدول جديد مش عمود جديد).
         # هنا بنزرع بس صف افتراضي **معطّل** لكل tenant عشان صفحة الداشبورد

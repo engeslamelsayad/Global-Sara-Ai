@@ -251,17 +251,38 @@ def test_empty_contact_number_never_says_undefined(env, monkeypatch):
 
 # ── صفحة المتابعات بتبين الحالة الحقيقية ──
 
-def test_followups_page_shows_disabled(env):
+def test_followups_on_off_comes_from_stages_only(env):
+    """مفيش خانة في السياسات تاني: المتابعات شغالة = فيه مرحلة مفعّلة."""
     app, c, tid, _ = env
+    from models import FollowupStage
+    assert "enable_followup" not in c.get("/dashboard/settings/policy").get_data(as_text=True)
     with app.app_context():
-        t = Tenant.query.get(tid)
-        t.policy.enable_followup = False
+        FollowupStage.query.filter_by(tenant_id=tid).update({"is_active": False})
         db.session.commit()
     assert "المتابعات واقفة دلوقتي" in c.get("/dashboard/followups").get_data(as_text=True)
     with app.app_context():
-        Tenant.query.get(tid).policy.enable_followup = True
+        st = FollowupStage.query.filter_by(tenant_id=tid).first()
+        st.is_active = True
         db.session.commit()
     assert "المتابعات واقفة دلوقتي" not in c.get("/dashboard/followups").get_data(as_text=True)
+
+
+def test_migration_keeps_tenants_that_had_followups_off_silent(env):
+    """حساب كان قافل الخانة: الـ migration بتوقف مراحله بدل ما المتابعات تشتغل عنده فجأة."""
+    app, _, tid, oid = env
+    import migrate_add_columns
+    from models import FollowupStage, Policy
+    with app.app_context():
+        pol = Policy.query.filter_by(tenant_id=oid).first()
+        pol.enable_followup = False
+        db.session.commit()
+        assert FollowupStage.query.filter_by(tenant_id=oid, is_active=True).count() > 0
+        mine_before = FollowupStage.query.filter_by(tenant_id=tid, is_active=True).count()
+    migrate_add_columns.run(app)
+    with app.app_context():
+        assert FollowupStage.query.filter_by(tenant_id=oid, is_active=True).count() == 0
+        assert Policy.query.filter_by(tenant_id=oid).first().enable_followup is True
+        assert FollowupStage.query.filter_by(tenant_id=tid, is_active=True).count() == mine_before
 
 
 # ── محادثة راجعة بعد غياب طويل = من غير التاريخ القديم (الدولار والشامي من أيام سوريا) ──
