@@ -69,6 +69,16 @@ def run(flask_app=None):
                 f"ALTER TABLE tenants ADD COLUMN {col} {typ}",
                 f"tenants.{col}")
 
+        print("\n=== 1ب-4. جدول tenants («أسئلة تليجرام» — الشخص اللي بيجاوب) ===")
+        for col, typ in [
+            ("questions_chat_id",   "VARCHAR(60)"),
+            ("questions_link_code", "VARCHAR(20)"),
+            ("questions_contact",   "VARCHAR(120)"),
+        ]:
+            ok_all &= safe_alter(conn,
+                f"ALTER TABLE tenants ADD COLUMN {col} {typ}",
+                f"tenants.{col}")
+
         print("\n=== 1ب-2. جدول tenants (عملة البزنس) ===")
         ok_all &= safe_alter(conn,
             "ALTER TABLE tenants ADD COLUMN currency VARCHAR(20) DEFAULT 'جنيه'",

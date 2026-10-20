@@ -81,6 +81,28 @@ def _send_single(chat_id, text, parse_mode="HTML"):
         return False
 
 
+def send_message_get_id(chat_id, text, parse_mode="HTML"):
+    """زي send_message لرسالة واحدة، بس بيرجّع message_id (أو None) — «أسئلة تليجرام»
+    محتاجاه عشان تعرف الـ Reply تبع أنهي سؤال."""
+    if not TELEGRAM_BOT_TOKEN or not chat_id:
+        return None
+    try:
+        r = requests.post(
+            f"{API_BASE}/sendMessage",
+            json={"chat_id": chat_id, "text": text[:TG_MAX_CHARS], "parse_mode": parse_mode,
+                  "disable_web_page_preview": True},
+            timeout=15,
+        )
+        d = r.json() if r.status_code == 200 else {}
+        if not d.get("ok"):
+            print(f"⚠️ Telegram {r.status_code}: {r.text[:120]}")
+            return None
+        return d.get("result", {}).get("message_id")
+    except Exception as e:
+        print(f"⚠️ Telegram send error: {e}")
+        return None
+
+
 def get_updates(offset=None):
     """يجيب الرسائل الجديدة للـ bot (long polling)"""
     if not TELEGRAM_BOT_TOKEN:
@@ -129,6 +151,14 @@ def process_link_messages(app):
 
         if not chat_id or not text:
             continue
+
+        # «أسئلة تليجرام»: كود ربط ASK-… أو Reply بإجابة على سؤال عميل
+        try:
+            import questions
+            if questions.handle_telegram_message(msg, app):
+                continue
+        except Exception as e:
+            print(f"⚠️ Telegram questions error: {e}")
 
         # أمر /start
         if text.startswith("/start"):

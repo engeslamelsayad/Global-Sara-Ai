@@ -14,7 +14,7 @@ from flask_login import login_required, current_user
 
 from models import (
     db, Tenant, Product, Policy, BotConfig, Keyword, BotAppId,
-    FollowupStage, Page, Order, SmartRule, MetaLabel, SalaryCampaign, AdProduct,
+    FollowupStage, Page, Order, SmartRule, MetaLabel, SalaryCampaign, AdProduct, BotQuestion,
 )
 from auth import login_required_dashboard
 from bot_engine import invalidate_tenant_cache
@@ -1059,6 +1059,141 @@ def orders_list():
     tenant = _current_tenant()
     orders = Order.query.filter_by(tenant_id=tenant.id).order_by(Order.created_at.desc()).limit(100).all()
     return render_template("orders.html", tenant=tenant, orders=orders)
+
+
+# =====================================================================
+# «أسئلة تليجرام» — ذاكرة البوت للمعلومات اللي الفريق أكدها (questions.py)
+# =====================================================================
+QA_MAX_Q, QA_MAX_A = 300, 1000
+
+
+def _qa_json():
+    """كل الـ APIs هنا JSON بس (حماية CSRF زي admin.py)."""
+    if not request.is_json:
+        return None
+    return request.get_json(silent=True) or {}
+
+
+@dashboard_bp.route("/telegram-questions")
+@login_required_dashboard
+def telegram_questions():
+    import os
+    import telegram_bot
+    tenant = _current_tenant()
+    rows = (BotQuestion.query.filter_by(tenant_id=tenant.id)
+            .order_by(BotQuestion.created_at.desc()).all())
+    products = (Product.query.filter_by(tenant_id=tenant.id, is_active=True)
+                .order_by(Product.name).all())
+    return render_template(
+        "telegram_questions.html", tenant=tenant, products=products,
+        names={p.product_key: p.name for p in products},
+        pending=[r.to_dict() for r in rows if r.status == "pending"],
+        facts=[r.to_dict() for r in rows if r.status != "pending"],
+        bot_username=os.environ.get("TELEGRAM_BOT_USERNAME", ""),
+        tg_configured=telegram_bot.is_configured())
+
+
+@dashboard_bp.route("/telegram-questions/link-code", methods=["POST"])
+@login_required_dashboard
+def telegram_questions_link_code():
+    import questions
+    if _qa_json() is None:
+        return jsonify({"ok": False, "error": "JSON only"}), 400
+    tenant = _current_tenant()
+    tenant.questions_link_code = questions.new_link_code()
+    db.session.commit()
+    return jsonify({"ok": True, "code": tenant.questions_link_code})
+
+
+@dashboard_bp.route("/telegram-questions/unlink", methods=["POST"])
+@login_required_dashboard
+def telegram_questions_unlink():
+    if _qa_json() is None:
+        return jsonify({"ok": False, "error": "JSON only"}), 400
+    tenant = _current_tenant()
+    tenant.questions_chat_id = tenant.questions_contact = tenant.questions_link_code = None
+    db.session.commit()
+    return jsonify({"ok": True})
+
+
+@dashboard_bp.route("/telegram-questions/add", methods=["POST"])
+@login_required_dashboard
+def telegram_questions_add():
+    data = _qa_json()
+    if data is None:
+        return jsonify({"ok": False, "error": "JSON only"}), 400
+    tenant = _current_tenant()
+    q = (data.get("question") or "").strip()[:QA_MAX_Q]
+    a = (data.get("answer") or "").strip()[:QA_MAX_A]
+    pk = (data.get("product_key") or "").strip() or None
+    if not q or not a:
+        return jsonify({"ok": False, "error": "اكتب السؤال والإجابة"}), 400
+    if pk and not Product.query.filter_by(tenant_id=tenant.id, product_key=pk).first():
+        pk = None
+    from datetime import datetime as _dt
+    row = BotQuestion(tenant_id=tenant.id, question=q, answer=a, product_key=pk,
+                      status="answered", source="dashboard", answered_at=_dt.utcnow())
+    try:
+        db.session.add(row)
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        print(f"⚠️ telegram_questions_add error: {e}")
+        return jsonify({"ok": False, "error": "ماقدرناش نحفظ — جرّب تاني"}), 500
+    return jsonify({"ok": True, "item": row.to_dict()})
+
+
+@dashboard_bp.route("/telegram-questions/<qid>", methods=["POST"])
+@login_required_dashboard
+def telegram_questions_update(qid):
+    """تعديل سؤال/إجابة، أو إيقاف/تفعيل. إجابة سؤال مستني من هنا بتتبعت للعملاء المستنيين."""
+    import questions
+    data = _qa_json()
+    if data is None:
+        return jsonify({"ok": False, "error": "JSON only"}), 400
+    tenant = _current_tenant()
+    row = BotQuestion.query.filter_by(id=qid, tenant_id=tenant.id).first()
+    if not row:
+        return jsonify({"ok": False, "error": "السؤال مش موجود"}), 404
+    if "question" in data:
+        qtext = (data.get("question") or "").strip()[:QA_MAX_Q]
+        if not qtext:
+            return jsonify({"ok": False, "error": "السؤال مايبقاش فاضي"}), 400
+        row.question = qtext
+    sent = 0
+    try:
+        if "answer" in data:
+            a = (data.get("answer") or "").strip()[:QA_MAX_A]
+            if not a:
+                return jsonify({"ok": False, "error": "اكتب الإجابة"}), 400
+            if row.status == "pending":
+                sent = questions.apply_answer(row, a, source="dashboard")
+            else:
+                row.answer = a
+        if data.get("status") in ("answered", "disabled"):
+            if data["status"] == "answered" and not row.answer:
+                return jsonify({"ok": False, "error": "مفيش إجابة — اكتبها الأول"}), 400
+            row.status = data["status"]
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        print(f"⚠️ telegram_questions_update error: {e}")
+        return jsonify({"ok": False, "error": "ماقدرناش نحفظ — جرّب تاني"}), 500
+    return jsonify({"ok": True, "item": row.to_dict(), "notified": sent})
+
+
+@dashboard_bp.route("/telegram-questions/<qid>/delete", methods=["POST"])
+@login_required_dashboard
+def telegram_questions_delete(qid):
+    if _qa_json() is None:
+        return jsonify({"ok": False, "error": "JSON only"}), 400
+    tenant = _current_tenant()
+    row = BotQuestion.query.filter_by(id=qid, tenant_id=tenant.id).first()
+    if not row:
+        return jsonify({"ok": False, "error": "السؤال مش موجود"}), 404
+    db.session.delete(row)
+    db.session.commit()
+    return jsonify({"ok": True})
 
 
 # =====================================================================

@@ -383,6 +383,14 @@ def build_system_prompt(bundle, matched_product=None, state=None):
                         "هنا في نفس المحادثة.")
         _return_channel = "مع فريق المتجر هنا في نفس المحادثة (من غير ما تذكري أي رقم)"
 
+    # «أسئلة تليجرام»: المعلومات اللي الفريق أكدها + إزاي يتصرف لو معلومة مش عنده
+    import questions
+    try:
+        _questions_txt = questions.prompt_section(tenant, products)
+    except Exception as e:
+        print(f"⚠️ questions prompt error: {e}")
+        _questions_txt = ""
+
     # مرساة مفردات اللهجة (من dialect_text — مصدر واحد للحقيقة)
     import dialect_text
     _dialect_vocab = dialect_text.vocab_hint(bc.dialect)
@@ -510,6 +518,7 @@ def build_system_prompt(bundle, matched_product=None, state=None):
    وإن الاستبدال أو الاسترجاع بيتم {_return_channel}
 السبب: تفاصيل الاسترجاع (زي خصم الشحن) بتتحدد مع فريق خاص، مش البوت. خليكي متعاطفة بلا وعود برقم معيّن.
 
+{_questions_txt}
 {smart_rules_txt}
 [⛔ ممنوع رص كل المنتجات]
 لو العميل سأل سؤال عام (بيسأل عن كل المتاح أو عايز "المنتج" من غير ما يحدد احتياجه):
@@ -1032,6 +1041,23 @@ def get_ai_response(bundle, sender_id, user_message, state,
         if new_hits:
             state["pending_custom_labels"] = new_hits
             print(f"🏷️ Custom labels matched: {new_hits} → {sender_id}")
+
+    # ── «أسئلة تليجرام»: [ASK|سؤال] = معلومة البوت مايعرفهاش (questions.py) ──
+    # العلامة بتتشال دايماً؛ والسؤال بيتسجل ويتبعت للفريق بس لو فيه حد مربوط
+    import questions
+    response_text, _asks = questions.extract(response_text)
+    if not response_text:
+        raise RuntimeError("AI reply was only an [ASK|...] tag")
+    if (_asks and state.get("platform") != "demo" and state.get("page_id") != "demo"
+            and questions.enabled(bundle["tenant"])):
+        for _q in _asks[:2]:
+            try:
+                questions.register(bundle["tenant"], _q, matched_product, sender_id,
+                                   state.get("page_id"), state.get("platform"))
+            except Exception as e:
+                from models import db as _db
+                _db.session.rollback()
+                print(f"⚠️ question register error: {e}")
 
     # ── كشف الطلب ──
     order_match = ORDER_PATTERN.search(response_text)

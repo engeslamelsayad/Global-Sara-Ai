@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% block title %}أسئلة تليجرام{% endblock %}
+{% block content %}
+<style>
+  .qa-item{border:1px solid var(--border,#e5e7eb); border-radius:12px; padding:14px; margin-bottom:10px; background:#fff}
+  .qa-item.off{opacity:.55}
+  .qa-meta{font-size:12px; color:var(--text-soft); margin-bottom:8px}
+  .qa-row{display:flex; gap:8px; flex-wrap:wrap; margin-top:8px}
+  .qa-item textarea{min-height:60px}
+</style>
+
+<div class="page-header">
+  <h1 class="page-title">أسئلة تليجرام ❓</h1>
+  <p class="page-sub">لما عميل يسأل عن معلومة البوت مايعرفهاش، بتتبعت هنا على تليجرام للشخص المربوط — وإجابته بتتحفظ في ذاكرة البوت تلقائياً</p>
+</div>
+
+<!-- 1) الربط -->
+<div class="card">
+  <h3 style="margin-top:0">👤 الشخص اللي بيجاوب على الأسئلة</h3>
+  {% if not tg_configured %}
+    <p style="color:#b91c1c">⚠️ بوت تليجرام بتاع المنصة مش متظبط على السيرفر (TELEGRAM_BOT_TOKEN) — الميزة مش هتشتغل لحد ما يتظبط.</p>
+  {% endif %}
+  <div id="link-on" style="{{ '' if tenant.questions_chat_id else 'display:none' }}">
+    <p>✅ مربوط بـ <b id="link-who">{{ tenant.questions_contact or 'حساب تليجرام' }}</b> — أي سؤال جديد هيوصله على تليجرام.</p>
+    <div class="qa-row">
+      <button class="btn btn-sm" onclick="newCode()">🔄 اربط شخص تاني</button>
+      <button class="btn btn-sm" style="color:#b91c1c" onclick="unlink()">فك الربط</button>
+    </div>
+  </div>
+  <div id="link-off" style="{{ 'display:none' if tenant.questions_chat_id else '' }}">
+    <p style="margin:0 0 8px">مفيش حد مربوط — <b>البوت دلوقتي مش هيوعد العميل إنه يرجعله</b>، هيقوله إن المعلومة مش متوفرة.</p>
+    <ol style="line-height:2; margin:0 0 8px">
+      <li>دوس «طلّع كود ربط».</li>
+      <li>الشخص اللي هيجاوب يفتح بوت المنصة على تليجرام{% if bot_username %} <a href="https://t.me/{{ bot_username }}" target="_blank">@{{ bot_username }}</a>{% endif %}.</li>
+      <li>يبعتله الكود — وخلاص، هيتربط.</li>
+    </ol>
+    <button class="btn btn-primary" onclick="newCode()">طلّع كود ربط</button>
+  </div>
+  <div id="code-box" style="display:none; margin-top:12px; padding:12px; background:#F4EEFF; border-radius:10px">
+    الكود: <b id="code" style="font-size:20px; letter-spacing:2px; direction:ltr; display:inline-block"></b>
+    <span class="hint">— ابعته لبوت المنصة على تليجرام من حساب الشخص اللي هيجاوب. بعد ما يتربط، اعمل refresh للصفحة.</span>
+  </div>
+  <p class="hint" style="margin-top:10px">💡 الشخص بيجاوب بإنه يعمل <b>Reply</b> على رسالة السؤال. الإجابة بتتبعت للعميل اللي سأل (لو لسه جوه 24 ساعة)، وبتتحفظ لكل اللي هيسألوا بعده.</p>
+</div>
+
+<!-- 2) المستني إجابة -->
+<div class="card">
+  <h3 style="margin-top:0">⏳ أسئلة مستنية إجابة <span class="badge" id="pending-count">{{ pending|length }}</span></h3>
+  <div id="pending-list">
+    {% for q in pending %}
+    <div class="qa-item" id="q-{{ q.id }}">
+      <div class="qa-meta">{{ names.get(q.product_key, 'عام') }} · {{ q.created_at }} · سأله {{ q.times_asked }} عميل{% if q.waiting %} · {{ q.waiting }} مستنيين الرد{% endif %}</div>
+      <b>{{ q.question }}</b>
+      <textarea class="ans" maxlength="1000" placeholder="اكتب الإجابة هنا — هتتبعت للعملاء المستنيين وتتحفظ في ذاكرة البوت"></textarea>
+      <div class="qa-row">
+        <button class="btn btn-primary btn-sm" onclick="answerPending('{{ q.id }}')">احفظ الإجابة وابعتها</button>
+        <button class="btn btn-sm" style="color:#b91c1c" onclick="del('{{ q.id }}')">حذف</button>
+      </div>
+    </div>
+    {% else %}
+    <p class="hint" id="pending-empty">مفيش أسئلة مستنية دلوقتي 👌</p>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- 3) ذاكرة البوت -->
+<div class="card">
+  <h3 style="margin-top:0">📚 ذاكرة البوت — معلومات مؤكدة</h3>
+  <p class="hint" style="margin-top:0">البوت بيستخدم المعلومات دي في كل محادثة زي بيانات المنتج. راجعها، عدّلها، أو وقّف أي واحدة مش صحيحة.</p>
+
+  <div class="qa-item" style="background:#FBF9FF">
+    <b>+ أضف معلومة بنفسك</b>
+    <div class="qa-row">
+      <select id="new-product" style="width:240px">
+        <option value="">عام (مش لمنتج معيّن)</option>
+        {% for p in products %}<option value="{{ p.product_key }}">{{ p.name }}</option>{% endfor %}
+      </select>
+    </div>
+    <input id="new-q" maxlength="300" placeholder="السؤال — مثلاً: مقاسات طقم الموكيت كام؟" style="margin-top:8px">
+    <textarea id="new-a" maxlength="1000" placeholder="الإجابة — مثلاً: 3 قطع: 50×80 و 50×120 و 50×160 سم"></textarea>
+    <div class="qa-row"><button class="btn btn-primary btn-sm" onclick="addFact()">إضافة</button></div>
+  </div>
+
+  <div id="facts-list">
+    {% for f in facts %}
+    <div class="qa-item {{ 'off' if f.status == 'disabled' }}" id="q-{{ f.id }}">
+      <div class="qa-meta">{{ names.get(f.product_key, 'عام') }} · {{ 'من تليجرام' if f.source == 'telegram' else 'من الداشبورد' }} · {{ f.answered_at }}
+        · <span class="st">{{ 'موقوفة' if f.status == 'disabled' else 'مفعّلة' }}</span></div>
+      <input class="q" maxlength="300" value="{{ f.question }}">
+      <textarea class="ans" maxlength="1000">{{ f.answer }}</textarea>
+      <div class="qa-row">
+        <button class="btn btn-primary btn-sm" onclick="saveFact('{{ f.id }}')">حفظ</button>
+        <button class="btn btn-sm tog" onclick="toggleFact('{{ f.id }}')">{{ 'تفعيل' if f.status == 'disabled' else 'إيقاف' }}</button>
+        <button class="btn btn-sm" style="color:#b91c1c" onclick="del('{{ f.id }}')">حذف</button>
+      </div>
+    </div>
+    {% else %}
+    <p class="hint" id="facts-empty">لسه مفيش معلومات — أول ما الفريق يجاوب على سؤال، هيظهر هنا.</p>
+    {% endfor %}
+  </div>
+</div>
+
+<script>
+const BASE = "{{ url_for('dashboard.telegram_questions') }}";
+async function api(path, body){
+  const r = await fetch(BASE + path, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body || {})});
+  const d = await r.json().catch(() => ({ok:false, error:'خطأ في الاتصال'}));
+  if (!d.ok) { alert(d.error || 'حصل خطأ'); return null; }
+  return d;
+}
+async function newCode(){
+  const d = await api('/link-code');
+  if (!d) return;
+  document.getElementById('code').textContent = d.code;
+  document.getElementById('code-box').style.display = '';
+}
+async function unlink(){
+  if (!confirm('البوت هيبطّل يبعت أسئلة، ومش هيوعد العملاء إنه يرجعلهم. متأكد؟')) return;
+  if (!await api('/unlink')) return;
+  document.getElementById('link-on').style.display = 'none';
+  document.getElementById('link-off').style.display = '';
+}
+async function answerPending(id){
+  const box = document.getElementById('q-' + id);
+  const a = box.querySelector('.ans').value.trim();
+  if (!a) { alert('اكتب الإجابة'); return; }
+  const d = await api('/' + id, {answer: a});
+  if (!d) return;
+  box.remove();
+  _bump();
+  _prependFact(d.item);
+  if (d.notified) alert('✅ اتحفظت واتبعتت لـ ' + d.notified + ' عميل كانوا مستنيين');
+}
+async function saveFact(id){
+  const box = document.getElementById('q-' + id);
+  const d = await api('/' + id, {question: box.querySelector('.q').value, answer: box.querySelector('.ans').value});
+  if (d) _flash(box);
+}
+async function toggleFact(id){
+  const box = document.getElementById('q-' + id);
+  const off = box.classList.contains('off');
+  const d = await api('/' + id, {status: off ? 'answered' : 'disabled'});
+  if (!d) return;
+  box.classList.toggle('off', d.item.status === 'disabled');
+  box.querySelector('.st').textContent = d.item.status === 'disabled' ? 'موقوفة' : 'مفعّلة';
+  box.querySelector('.tog').textContent = d.item.status === 'disabled' ? 'تفعيل' : 'إيقاف';
+}
+async function del(id){
+  if (!confirm('هتتمسح من ذاكرة البوت نهائياً. متأكد؟')) return;
+  if (!await api('/' + id + '/delete')) return;
+  const box = document.getElementById('q-' + id);
+  if (box && box.parentElement.id === 'pending-list') _bump();
+  if (box) box.remove();
+}
+async function addFact(){
+  const q = document.getElementById('new-q'), a = document.getElementById('new-a');
+  const d = await api('/add', {question: q.value, answer: a.value, product_key: document.getElementById('new-product').value});
+  if (!d) return;
+  q.value = ''; a.value = '';
+  _prependFact(d.item);
+}
+function _bump(){
+  const c = document.getElementById('pending-count');
+  c.textContent = Math.max(0, (parseInt(c.textContent) || 1) - 1);
+}
+function _flash(el){ el.style.borderColor = '#10b981'; setTimeout(() => el.style.borderColor = '', 1200); }
+// عنصر جديد بالـ DOM + textContent — مفيش نص من العميل أو الفريق بيدخل innerHTML
+function _prependFact(f){
+  const empty = document.getElementById('facts-empty'); if (empty) empty.remove();
+  const box = document.createElement('div');
+  box.className = 'qa-item'; box.id = 'q-' + f.id;
+  const meta = document.createElement('div'); meta.className = 'qa-meta';
+  meta.append((f.source === 'telegram' ? 'من تليجرام' : 'من الداشبورد') + ' · ' + f.answered_at + ' · ');
+  const st = document.createElement('span'); st.className = 'st'; st.textContent = 'مفعّلة'; meta.append(st);
+  const q = document.createElement('input'); q.className = 'q'; q.maxLength = 300; q.value = f.question;
+  const a = document.createElement('textarea'); a.className = 'ans'; a.maxLength = 1000; a.value = f.answer;
+  const row = document.createElement('div'); row.className = 'qa-row';
+  const mk = (txt, cls, fn, color) => { const b = document.createElement('button'); b.className = cls; b.textContent = txt;
+    if (color) b.style.color = color; b.onclick = fn; return b; };
+  row.append(mk('حفظ', 'btn btn-primary btn-sm', () => saveFact(f.id)),
+             mk('إيقاف', 'btn btn-sm tog', () => toggleFact(f.id)),
+             mk('حذف', 'btn btn-sm', () => del(f.id), '#b91c1c'));
+  box.append(meta, q, a, row);
+  document.getElementById('facts-list').prepend(box);
+  _flash(box);
+}
+</script>
+{% endblock %}

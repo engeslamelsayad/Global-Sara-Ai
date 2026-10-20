@@ -54,6 +54,11 @@ class Tenant(db.Model):
     telegram_chat_id      = db.Column(db.String(60))    # معرّف محادثة التاجر
     telegram_link_code    = db.Column(db.String(20))    # كود مؤقت لربط الحساب
     telegram_enabled      = db.Column(db.Boolean, default=False)
+    # «أسئلة تليجرام»: الشخص اللي بيجاوب على أسئلة العملاء اللي البوت مايعرفهاش
+    # (ممكن يكون غير التاجر اللي بتوصله التقارير) — questions.py
+    questions_chat_id     = db.Column(db.String(60))
+    questions_link_code   = db.Column(db.String(20))
+    questions_contact     = db.Column(db.String(120))   # اسمه على تليجرام (للعرض)
 
     # مدرّب المبيعات — تقرير دوري بتحليل المحادثات
     coach_enabled         = db.Column(db.Boolean, default=True)
@@ -83,6 +88,7 @@ class Tenant(db.Model):
                                      order_by="SmartRule.created_at")
     meta_labels   = db.relationship("MetaLabel",      backref="tenant", cascade="all, delete-orphan")
     ad_products   = db.relationship("AdProduct",      backref="tenant", cascade="all, delete-orphan")
+    bot_questions = db.relationship("BotQuestion",    backref="tenant", cascade="all, delete-orphan")
 
     def to_dict(self):
         return {
@@ -533,4 +539,43 @@ class AdProduct(db.Model):
             "product_key": self.product_key, "mode": self.mode,
             "votes": json.loads(self.votes or "{}"), "hits": self.hits or 0,
             "last_seen": self.last_seen.strftime("%Y-%m-%d %H:%M") if self.last_seen else "",
+        }
+
+
+# =====================================================================
+# BOT_QUESTION — «أسئلة تليجرام»: ذاكرة البوت للمعلومات اللي الفريق أكدها
+# =====================================================================
+class BotQuestion(db.Model):
+    """
+    عميل سأل عن معلومة مش في بيانات المنتج (مقاس، لون، خامة…) → البوت بيكتب [ASK|…]،
+    والسؤال بيتبعت على تليجرام للشخص المربوط. ردّه (Reply على الرسالة) بيتحفظ هنا،
+    وبيدخل البرومبت كمعلومة مؤكدة، وبيتبعت للعملاء اللي كانوا مستنيين.
+    التاجر بيراجع/يعدّل/يوقف أي إجابة من صفحة «أسئلة تليجرام».
+
+    status: pending (مستني إجابة) / answered (في ذاكرة البوت) / disabled (موقوف)
+    """
+    __tablename__ = "bot_questions"
+
+    id             = db.Column(db.String(36), primary_key=True, default=gen_uuid)
+    tenant_id      = db.Column(db.String(36), db.ForeignKey("tenants.id"), nullable=False, index=True)
+    question       = db.Column(db.Text, nullable=False)
+    answer         = db.Column(db.Text)
+    product_key    = db.Column(db.String(80))
+    status         = db.Column(db.String(12), default="pending", index=True)
+    source         = db.Column(db.String(12), default="telegram")   # telegram / dashboard
+    askers         = db.Column(db.Text, default="[]")   # JSON: [{psid, page_id, platform, t}] مستنيين الرد
+    times_asked    = db.Column(db.Integer, default=1)
+    tg_chat_id     = db.Column(db.String(60))
+    tg_message_id  = db.Column(db.String(40), index=True)
+    created_at     = db.Column(db.DateTime, default=datetime.utcnow)
+    answered_at    = db.Column(db.DateTime)
+
+    def to_dict(self):
+        return {
+            "id": self.id, "question": self.question, "answer": self.answer or "",
+            "product_key": self.product_key or "", "status": self.status,
+            "source": self.source, "times_asked": self.times_asked or 1,
+            "waiting": len(json.loads(self.askers or "[]")) if self.status == "pending" else 0,
+            "created_at": self.created_at.strftime("%Y-%m-%d %H:%M") if self.created_at else "",
+            "answered_at": self.answered_at.strftime("%Y-%m-%d %H:%M") if self.answered_at else "",
         }
