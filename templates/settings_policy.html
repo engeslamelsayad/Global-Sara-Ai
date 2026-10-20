@@ -31,10 +31,7 @@
     <input type="checkbox" name="enable_chronic_disease_warning" id="ecdw" {{ 'checked' if policy.enable_chronic_disease_warning }}>
     <label for="ecdw" style="margin:0">تفعيل تحذير الأمراض المزمنة (قلب/سكر/ضغط)</label>
   </div>
-  <div class="checkbox-row">
-    <input type="checkbox" name="enable_followup" id="efu" {{ 'checked' if policy.enable_followup }}>
-    <label for="efu" style="margin:0">تفعيل رسائل المتابعة التلقائية</label>
-  </div>
+  <p class="hint" style="margin:6px 0 10px">📨 رسائل المتابعة بتتشغل وتتوقف من <a href="{{ url_for('dashboard.followups_list') }}">صفحة رسائل المتابعة</a> — أي مرحلة مفعّلة هناك = المتابعات شغالة.</p>
   <div class="checkbox-row">
     <input type="checkbox" name="enable_installments" id="ei" {{ 'checked' if policy.enable_installments }}>
     <label for="ei" style="margin:0">يوجد نظام تقسيط (لو مفعّل، البوت يقدر يذكره)</label>

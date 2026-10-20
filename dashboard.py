@@ -760,7 +760,6 @@ def settings_policy():
         policy.inspection_policy = request.form.get("inspection_policy", "").strip()
         policy.enable_sensitive_area_warning  = bool(request.form.get("enable_sensitive_area_warning"))
         policy.enable_chronic_disease_warning = bool(request.form.get("enable_chronic_disease_warning"))
-        policy.enable_followup  = bool(request.form.get("enable_followup"))
         policy.enable_installments = bool(request.form.get("enable_installments"))
         try:
             db.session.commit()
@@ -889,10 +888,8 @@ def keywords_ai_suggest():
 def followups_list():
     tenant = _current_tenant()
     stages = FollowupStage.query.filter_by(tenant_id=tenant.id).order_by(FollowupStage.stage_number).all()
-    # الخانة في صفحة السياسات بتوقف كل المتابعات — الصفحة دي لازم تبين ده
-    # (كانت مكتوب عليها «مفعّل تلقائياً» حتى والمتابعات واقفة)
-    policy = tenant.policy
-    followups_on = not (policy and not policy.enable_followup)
+    # مصدر واحد للحقيقة: المتابعات شغالة = فيه مرحلة مفعّلة (مفيش خانة تانية في السياسات)
+    followups_on = any(s.is_active for s in stages)
     return render_template("followups.html", tenant=tenant, stages=stages,
                            followups_on=followups_on)
 

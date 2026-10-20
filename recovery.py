@@ -90,11 +90,9 @@ def run_followups(app):
     with app.app_context():
         tenants = Tenant.query.filter_by(is_active=True).all()
         for tenant in tenants:
-            # المتابعات مفعّلة؟
-            policy = getattr(tenant, "policy", None)
-            if policy and not getattr(policy, "enable_followup", True):
-                continue
-
+            # المتابعات شغالة = فيه مرحلة واحدة مفعّلة على الأقل (من صفحة رسائل المتابعة).
+            # كان فيه كمان خانة في صفحة السياسات بتوقف الكل — اتشالت لأنها كانت بتلخبط
+            # (الصفحة تقول «مفعّل» والمتابعات واقفة). شوف migrate_add_columns خطوة 10ب.
             stages = (FollowupStage.query
                       .filter_by(tenant_id=tenant.id, is_active=True)
                       .order_by(FollowupStage.stage_number).all())
