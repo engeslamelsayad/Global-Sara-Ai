@@ -643,12 +643,28 @@ AUTOFILL_MAX_RULES = 6
 SMART_RULE_CATEGORIES = ("sales", "safety", "behavior", "custom")
 
 
+# «هفكر» حسب الأسلوب — لازم يطابق جدول الأساليب في sales_playbook (الحازم = اعتراض متخفّي)
+_AUTOFILL_LATER = {
+    "calm": "باحترام فوري: يسيبله الباب مفتوح من غير ضغط",
+    "balanced": "يسأل سؤال تشخيص واحد عن سبب التردد، يعالجه بضمانة، ويسيبه بخروج محترم لو أصرّ",
+    "assertive": "يتعامل معاه كاعتراض متخفّي: يسأل هو محتاج يفكر في إيه بالظبط (السعر؟ المقاس؟ "
+                 "الجودة؟)، يعالج النقطة دي بضمانة، ويرجع يطلب المدينة — من غير «خد وقتك»",
+}
+
+
 def autofill_bot_settings(ctx):
     """
     ctx: dict فيه business_name, business_description, industry, dialect, currency,
-         sales_style, policies_text, products_text, limited_stock
+         sales_style, policies_text, products_text, limited_stock,
+         current_bot_name (اسم البوت الحالي — بيفضل زي ما هو)، questions_linked (أسئلة تليجرام مربوطة)
     بيرجّع dict بكل الحقول + smart_rules + notes — أو {"error": ...}
     """
+    style = ctx.get("sales_style") or "balanced"
+    cur_name = (ctx.get("current_bot_name") or "").strip()
+    later_how = _AUTOFILL_LATER.get(style, _AUTOFILL_LATER["balanced"])
+    missing_info = ("سؤال للفريق عن طريق «أسئلة تليجرام» (البوت بيعملها لوحده)"
+                    if ctx.get("questions_linked") else
+                    "البوت يقول بصراحة إن المعلومة مش عنده ويكمّل على الطلب")
     prompt = f"""انت خبير إعداد بوتات مبيعات على ماسنجر وإنستجرام. مطلوب منك تجهّز إعدادات بوت
 لبزنس حقيقي من البيانات دي بس:
 
@@ -669,7 +685,7 @@ def autofill_bot_settings(ctx):
 
 رد بصيغة JSON بالظبط بالشكل ده:
 {{
-  "bot_name": "اسم أنثوي بسيط مناسب للهجة",
+  "bot_name": "{cur_name or 'اسم أنثوي بسيط مناسب للهجة'}",
   "bot_age": رقم بين 22 و35,
   "persona": "وصف الشخصية في 2-3 جمل: مين هي، بتبيع إيه، ولمين. من غير قواعد سلوك.",
   "tone": "النبرة في 3-5 كلمات",
@@ -677,7 +693,7 @@ def autofill_bot_settings(ctx):
   "forbidden_openers": ["3-5 بدايات رد ضعيفة أو باردة بنفس اللهجة"],
   "objection_expensive": "إزاي يرد على اعتراض السعر لبزنس ده بالذات — جملتين بالكتير",
   "objection_unsure": "إزاي يطمّن المتردد — جملتين بالكتير، من الضمانات اللي في السياسات بس",
-  "objection_later": "إزاي يتعامل مع التأجيل — جملتين بالكتير",
+  "objection_later": "إزاي يتعامل مع التأجيل — جملتين بالكتير، {later_how}",
   "smart_rules": [
     {{"category": "sales أو safety أو behavior أو custom", "text": "قاعدة واحدة في جملة أو جملتين"}}
   ],
@@ -687,7 +703,12 @@ def autofill_bot_settings(ctx):
 قواعد القواعد الذكية (smart_rules):
 - من 2 لـ {AUTOFILL_MAX_RULES} قواعد بالكتير، كل واحدة عن حاجة **خاصة بالبزنس ده** ومش متغطية
   في الحقول التانية: مناطق التوصيل، طريقة استخدام أو تحذير لمنتج معين، لمين المنتج
-  مايناسبش (لو مذكور)، إيه اللي يتحوّل لموظف.
+  مايناسبش (لو مذكور).
+- البوت مابيحوّلش لموظف إلا في الشكاوى والاسترجاع/الاستبدال (والتاجر بيوصله تنبيه لوحده).
+  أي قاعدة تانية فيها «حوّلي للموظف» أو «الموظف يتابع» ممنوعة — المعلومة الناقصة = {missing_info}.
+- البوت عنده خطوات طلب ثابتة: بعد السعر يسأل عن المدينة، وبعدها الاسم والهاتف والعنوان في رسالة
+  واحدة. ماتكتبش قاعدة بتغيّر الترتيب ده، ولا بتضيف سؤال للعميل قبل الطلب (مقاس مكانه، استخدامه…)
+  إلا لو المنتج فيه اختيارات فعلاً (مقاسات/ألوان مختلفة) لازم يختار منها.
 - قاعدة "safety" لأي منتج عناية/صحة: من غير تشخيص ولا وعد بنتيجة، ولو فيه حالة طبية → يرجع لدكتور.
 - القاعدة ماتعارضش أسلوب البيع المختار ({ctx.get("sales_style") or "balanced"}).
 - مفيش قاعدتين بيقولوا نفس الحاجة.
@@ -699,6 +720,8 @@ def autofill_bot_settings(ctx):
         return result
 
     # تنضيف وتحديد — الـ AI مابيلتزمش بالحدود دايماً
+    if cur_name:
+        result["bot_name"] = cur_name    # تغيير الاسم في نص المحادثات بيلخبط العملاء
     rules = []
     for r in (result.get("smart_rules") or []):
         if not isinstance(r, dict):

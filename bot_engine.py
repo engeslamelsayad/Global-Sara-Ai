@@ -1342,7 +1342,11 @@ def _price_list(products, currency):
 _YESNO_RE = None
 _EMPLOYEE_RE = None
 _HUMAN_ASK = ("موظف", "بشري", "انسان", "مسؤول", "مسئول", "ادارة", "اداره", "مدير", "حد يكلمني",
-              "اكلم حد", "نكلم حد")
+              "اكلم حد", "نكلم حد",
+              # شكوى / استرجاع / استبدال = التحويل للموظف صح (والتاجر بيوصله تنبيه)
+              # («نرجعلك» و«مافي مشكلة» كلام عادي — مش هنا)
+              "استرجاع", "ارجاع", "نرجعه", "ارجعه", "استبدال", "تبديل", "نبدله", "ابدله",
+              "عيب", "معيوب", "مكسور", "تالف", "خربان", "شكوى", "شكوي")
 # مش بتتشال لو الإعادة فشلت (شيلها بيسيب الرد من غير إغلاق) — بتتسجّل في الـ log بس
 _KEEP_ON_FAIL = ("yesno_close",)
 
@@ -1396,7 +1400,8 @@ def reply_problems(text, products, currency, state=None, bc=None, user_message="
                         "اقفلي بسؤال المدينة بس (العميل من أي مدينة) زي ما في خطوات سلّم الطلب.",
                         m.group(0)))
     m = _EMPLOYEE_RE.search(text or "")
-    if (m and not st.get("is_human_handoff") and not questions.ASK_PATTERN.search(text or "")
+    if (m and not st.get("is_human_handoff") and not st.get("has_complaint")
+            and not questions.ASK_PATTERN.search(text or "")
             and not any(w in _normalize_ar(user_message or "") for w in
                         (_normalize_ar(x) for x in _HUMAN_ASK))):
         out.append(("fake_employee", f"وعدتي «{m.group(0)}» والعميل ماطلبش موظف ومحدش هيتابع. "

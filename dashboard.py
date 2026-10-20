@@ -633,6 +633,8 @@ def ai_autofill():
         "policies_text": _policies_text(tenant.policy),
         "products_text": "\n".join(lines),
         "limited_stock": bool(getattr(bc, "limited_stock_enabled", False)),
+        "current_bot_name": (getattr(bc, "bot_name", None) or "").strip(),
+        "questions_linked": bool(getattr(tenant, "questions_chat_id", None)),
     }
     try:
         result = ai_assist.autofill_bot_settings(ctx)
