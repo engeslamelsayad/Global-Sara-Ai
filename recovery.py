@@ -22,6 +22,19 @@ MAX_SENDS_PER_RUN = 30
 # (من غير ما توقف المراحل اللي بعدها)، وعميل عدّى عليه ده من آخر رسالة ماياخدش متابعة.
 WINDOW_HOURS = 23
 
+# ساعات الهدوء (بتوقيت بلد التاجر): مفيش متابعة من 12 بالليل لـ 9 الصبح — بتستنى للصبح
+# (لو لسه جوه الشباك). حصل: 60 متابعة اتبعتت الساعة 1:20 بالليل بتوقيت ليبيا.
+QUIET_START, QUIET_END = 0, 9
+# فرق التوقيت عن UTC حسب عيلة اللهجة (مفيش عمود timezone؛ ساعة فرق في الصيفي مش مشكلة هنا)
+_UTC_OFFSET = {"libya": 2, "egypt": 2, "levant": 3, "gulf": 3, "iraqi": 3, "maghreb": 1, "msa": 3}
+
+
+def is_quiet_hours(dialect, now=None):
+    import dialect_text
+    off = _UTC_OFFSET.get(dialect_text.family(dialect), 2)
+    hour = int(((now if now is not None else time.time()) / 3600 + off) % 24)
+    return QUIET_START <= hour < QUIET_END
+
 
 def _pick_product(state, products):
     """يرجّع آخر منتج سأل عنه العميل (لو موجود)"""
@@ -103,6 +116,8 @@ def run_followups(app):
                                   .order_by(FollowupStage.stage_number).all())
                       if (s.hours_after_last or 0) < WINDOW_HOURS]
             if not stages:
+                continue
+            if is_quiet_hours(getattr(tenant.bot_config, "dialect", None) or "مصري", now):
                 continue
 
             sends_this_tenant = 0
