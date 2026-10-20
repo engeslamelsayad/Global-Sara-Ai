@@ -257,12 +257,24 @@ def capture_ad_referral(bundle, event, sender_id):
     referral = (event.get("message", {}) or {}).get("referral") or event.get("referral")
     if not referral or referral.get("source") != "ADS":
         return
-    ad_title = referral.get("ads_context_data", {}).get("ad_title", "")
-    if not ad_title:
+    import ads
+    ad_key, ad_title = ads.ad_key_from_referral(referral)
+    if not ad_key:
         return
 
     tenant = bundle["tenant"]
-    matched = find_relevant_product(ad_title, bundle["products"])
+    products = bundle["products"]
+    # الأولوية: ربط الإعلان من جدول AdProduct (يدوي أو اتعلمه البوت) ← مطابقة العنوان
+    matched = None
+    try:
+        _pk = ads.record_hit(tenant.id, ad_key, ad_title, sender_id)
+        matched = next((p for p in products if p.product_key == _pk), None) if _pk else None
+    except Exception as e:
+        from models import db as _db
+        _db.session.rollback()
+        print(f"⚠️ ad mapping error: {e}")
+    if not matched and ad_title:
+        matched = find_relevant_product(ad_title, products)
     state = load_state(tenant.id, sender_id)
     if not state or "stage" not in state:
         # 🛡️ عميل جديد جاي من الإعلان — لازم نبني state *كامل* مش جزئي.
@@ -275,12 +287,13 @@ def capture_ad_referral(bundle, event, sender_id):
         full = default_state(tenant.id, page_id, platform)
         full.update(state or {})
         state = full
-    state["source_ad_title"] = ad_title
+    state["source_ad_title"] = ad_title or "إعلان"
+    state["source_ad_key"] = ad_key
     if matched:
         state["source_ad_product_key"] = matched.product_key
-        print(f"📢 عميل من إعلان: '{ad_title[:40]}' → منتج: {matched.name}")
+        print(f"📢 عميل من إعلان: '{(ad_title or ad_key)[:40]}' → منتج: {matched.name}")
     else:
-        print(f"📢 عميل من إعلان: '{ad_title[:40]}' (لم يُطابَق منتج)")
+        print(f"📢 عميل من إعلان: '{(ad_title or ad_key)[:40]}' (لم يُطابَق منتج)")
     save_state(tenant.id, sender_id, state)
 
 
@@ -355,6 +368,21 @@ def build_system_prompt(bundle, matched_product=None, state=None):
 
     smart_rules_txt += custom_labels_txt
 
+    # رقم التواصل: لو فاضي، البوت كان بيقول للعميل حرفياً «الرقم الرسمي: غير محدد»
+    if (bc.contact_number or "").strip():
+        _ch = "الواتساب" if bc.contact_channel == "whatsapp" else "التواصل"
+        _contact_txt = (f"رقم {_ch} الرسمي: {bc.contact_number.strip()}"
+                        + ("\nهذا الرقم للواتساب فقط — مش للمكالمات"
+                           if bc.contact_channel == "whatsapp" else ""))
+        _return_channel = (f"من خلال التواصل على "
+                           f"{'الواتساب' if bc.contact_channel == 'whatsapp' else 'الرقم'}: "
+                           f"{bc.contact_number.strip()}")
+    else:
+        _contact_txt = ("مفيش رقم تواصل مسجّل — ❌ ماتذكريش أي رقم ولا تقولي «غير محدد». "
+                        "لو العميل محتاج متابعة من المتجر، قوليله إن فريق المتجر هيتابع معاه "
+                        "هنا في نفس المحادثة.")
+        _return_channel = "مع فريق المتجر هنا في نفس المحادثة (من غير ما تذكري أي رقم)"
+
     # مرساة مفردات اللهجة (من dialect_text — مصدر واحد للحقيقة)
     import dialect_text
     _dialect_vocab = dialect_text.vocab_hint(bc.dialect)
@@ -397,6 +425,9 @@ def build_system_prompt(bundle, matched_product=None, state=None):
 مش نص تنقليه حرفياً. أعيدي صياغة كل جملة بلهجة {bc.dialect} قبل ما تبعتيها.
 لو لقيتي كلمة في التعليمات مش من لهجة {bc.dialect} — بدّليها بمقابلها الصحيح.
 ممنوع تخلطي لهجتين في نفس الرد.
+👤 جنس العميل مش معروف لحد ما يبان (من اسمه أو كلامه): خاطبيه بصيغة المذكر العامة
+   المعتادة في {bc.dialect} — ❌ ماتستخدميش صيغة المؤنث (تحبي، قوليلي، بعتيها) مع عميل
+   ماتعرفيش إنها ست.
 
 [اسم الشركة]
 {tenant.business_name}
@@ -466,8 +497,7 @@ def build_system_prompt(bundle, matched_product=None, state=None):
 استخدميها كأفكار تعيدي صياغتها بلهجتك وباختصار — مش نص تنقليه حرفياً.
 
 [بيانات التواصل]
-رقم {('الواتساب' if bc.contact_channel == 'whatsapp' else 'التواصل')} الرسمي: {bc.contact_number or 'غير محدد'}
-{"هذا الرقم للواتساب فقط — مش للمكالمات" if bc.contact_channel == "whatsapp" else ""}
+{_contact_txt}
 لا تذكري أي رقم آخر أبداً تحت أي ظرف
 
 [⛔ قاعدة الاستبدال والاسترجاع — مهمة جداً]
@@ -475,10 +505,9 @@ def build_system_prompt(bundle, matched_product=None, state=None):
 ❌ ممنوع تسجّلي طلب استرجاع أو تاخدي بياناته لتسجيل مرتجع
 ❌ ممنوع تقولي "استرجاع كامل" أو تحددي أي مبلغ هيرجعله
 ❌ ممنوع تعملي [ORDER|...] لطلب استرجاع
-✅ طمّنيه إن حقه محفوظ ووجّهيه للتواصل على الرقم الرسمي — بصياغتك أنتي وبلهجة
+✅ طمّنيه إن حقه محفوظ ووضّحيله طريقة المتابعة — بصياغتك أنتي وبلهجة
    {bc.dialect}، والمعنى المطلوب: إن حقه محفوظ تماماً وكل العملاء مقدّرين عندنا،
-   وإن الاستبدال أو الاسترجاع بيتم من خلال التواصل على
-   {('الواتساب' if bc.contact_channel == 'whatsapp' else 'الرقم')}: {bc.contact_number or 'الرقم الرسمي'}
+   وإن الاستبدال أو الاسترجاع بيتم {_return_channel}
 السبب: تفاصيل الاسترجاع (زي خصم الشحن) بتتحدد مع فريق خاص، مش البوت. خليكي متعاطفة بلا وعود برقم معيّن.
 
 {smart_rules_txt}
@@ -561,6 +590,14 @@ def build_system_prompt(bundle, matched_product=None, state=None):
                if _display_price(matched_product, currency) else
                "السعر: غير مسجّل — ماتخترعيش رقم، قولي إنك هتأكديه وحوّلي للرقم الرسمي.\n")
         )
+        _offer = _price_offer(matched_product)
+        if _offer:
+            _n, _o, _pct = _offer
+            _fmt = lambda x: int(x) if float(x).is_integer() else x
+            prod_block += (
+                f"🏷️ عرض ساري: {_fmt(_n)} بدل {_fmt(_o)} = خصم {_pct}% تقريباً — ده عرض حقيقي، "
+                f"وغالباً هو الخصم اللي العميل شافه في الإعلان. لو سأل عن خصم أو عرض أو «اللي في "
+                f"الإعلان»: أكّديه بالأرقام دي. ❌ ماتقوليش «مفيش خصم» ولا «ما عنديش عرض».\n")
         if features_txt:
             prod_block += f"المميزات الرئيسية:\n{features_txt}\n"
         if matched_product.who_benefits:
@@ -618,14 +655,21 @@ def build_system_prompt(bundle, matched_product=None, state=None):
 
     # ── 🧭 العميل فين في رحلة الشراء (من الـ state — الموديل مايعرفهاش لوحده) ──
     if state and not state.get("has_order"):
-        if state.get("source_ad_title") and state.get("messages_count", 0) <= 2:
+        if (state.get("source_ad_title") and not state.get("source_ad_product_key")
+                and not matched_product):
+            dynamic_parts.append(
+                "🧭 العميل جاي من إعلان بس مش عارفين الإعلان عن أنهي منتج. لو سأل عن السعر أو "
+                "التفاصيل من غير ما يحدد: اطلبي منه في سطر واحد يبعت صورة الإعلان أو اسم المنتج. "
+                "❌ ماتخمّنيش منتج وتقولي سعره، وماتعدّيش قايمة المنتجات كلها.")
+        elif state.get("source_ad_title") and state.get("messages_count", 0) <= 2:
             dynamic_parts.append(
                 f"🧭 العميل جاي من إعلان «{state['source_ad_title'][:80]}» — هو عارف المنتج "
                 f"ومهتم بيه. ماتسأليهوش أسئلة استكشافية عامة؛ ادخلي على القيمة والسعر والإغلاق.")
         elif state.get("stage") == "OBJECTION":
             dynamic_parts.append(sales_playbook.objection_hint(
                 getattr(bc, "sales_style", None), state.get("objections_count", 1),
-                state.get("refusals_count", 0) if state.get("last_was_refusal") else 0))
+                state.get("refusals_count", 0) if state.get("last_was_refusal") else 0,
+                soft_exit=bool(state.get("last_was_soft_exit"))))
         elif state.get("price_quoted"):
             dynamic_parts.append(sales_playbook.price_hint(getattr(bc, "sales_style", None)))
 
@@ -715,6 +759,29 @@ def is_refusal(message):
     t = _re.sub(r"\s+", " ", t).strip()
     t = _re.sub(r"^ل(ا)+$", "لا", t)            # «لااا»
     return t in _REFUSALS
+
+
+# خروج مؤدب بعد السعر («شكراً بارك الله فيك»، «باهي نشوف») — مش رفض صريح بس العميل
+# بيقفل المحادثة. الحازم بيعتبره تردد متخفّي ويحاول مرة (sales_playbook.objection_hint).
+_SOFT_EXIT_STARTS = ("شكرا", "مشكور", "تسلم", "يسلمو", "بارك الله", "الله يبارك",
+                     "جزاك الله", "ربي يحفظ", "ربي يبارك", "يعطيك العافيه", "thanks", "thank you")
+# عبارات كاملة بس — «نشوف» لوحدها ممكن تبقى طلب («ممكن نشوف الألوان؟»)
+_SOFT_EXIT_WORDS = ("خليني نشوف", "خليني انشوف", "نزيد نشوف", "انزيد انشوف", "نشوف ونرد",
+                    "نشوف وانرد", "نشوف بعدين", "نفكر فيها", "انفكر فيها", "نرد عليك",
+                    "نرجعلك", "نرجع لك", "مرة اخري", "مره اخري")
+
+
+def is_soft_exit(message):
+    """True لو الرسالة كلها شكر/تأجيل قصير من غير سؤال ولا طلب."""
+    import re as _re
+    t = _normalize_ar(message or "")
+    t = _re.sub(r"[^\w\s]", " ", t)
+    t = _re.sub(r"\s+", " ", t).strip()
+    if not t or len(t.split()) > 7 or "?" in (message or "") or "؟" in (message or ""):
+        return False
+    starts = tuple(_normalize_ar(x) for x in _SOFT_EXIT_STARTS)
+    words = tuple(_normalize_ar(x) for x in _SOFT_EXIT_WORDS)
+    return t.startswith(starts) or any(w in t for w in words)
 
 
 def _kw_hit(kw_value, msg_lower):
@@ -909,6 +976,17 @@ def get_ai_response(bundle, sender_id, user_message, state,
     # ── رفض صريح («لا») بعد السعر: مش keyword اعتراض، بس لازم يتعدّ ──
     # من غيره المرحلة بتفضل INTERESTED والبوت بيودّع العميل من أول «لا» حتى في الحازم.
     state["last_was_refusal"] = False
+    state["last_was_soft_exit"] = False
+    if (not _obj_types and state.get("price_quoted") and not state.get("has_order")
+            and getattr(bc, "sales_style", None) == "assertive"
+            and not state.get("soft_exits") and not is_refusal(user_message)
+            and is_soft_exit(user_message)):
+        # الحازم: «شكراً»/«نشوف» بعد السعر = تردد متخفّي → محاولة واحدة بس
+        state["soft_exits"] = 1
+        state["last_was_soft_exit"] = True
+        state["stage"] = "OBJECTION"
+        state["objections_count"] = state.get("objections_count", 0) + 1
+        print(f"🚪 Soft exit from {sender_id} — assertive tries once")
     if not _obj_types and state.get("price_quoted") and is_refusal(user_message):
         state["last_was_refusal"] = True
         state["refusals_count"] = state.get("refusals_count", 0) + 1
@@ -937,7 +1015,7 @@ def get_ai_response(bundle, sender_id, user_message, state,
         messages=messages,
         **model_catalog.request_kwargs(_model, bc.max_tokens or 600),
     )
-    response_text = model_catalog.response_text(response_obj)
+    response_text = _strip_meta(model_catalog.response_text(response_obj))
     if not response_text:
         # رفض من الـ safety classifiers أو الرد اتقطع قبل أي نص —
         # مانبعتش رسالة فاضية للعميل، نسيبها لـ _handle_ai_failure
@@ -977,6 +1055,26 @@ def get_ai_response(bundle, sender_id, user_message, state,
             }
             state["has_order"] = True
             state["stage"] = "ORDERED"
+
+    # ── 📢 تعلّم ربط الإعلان بالمنتج (ads.py) ──
+    # الدليل من العميل بس: سمّى المنتج، أو بعت صورة الإعلان والبوت عرف المنتج منها.
+    # تخمين البوت مايتحسبش (كان بيقول سعر الكبسولات لعميل جاي عشان الموكيت).
+    if (state.get("source_ad_key") and not state.get("source_ad_product_key")
+            and not state.get("ad_vote_cast")):
+        _named = [p for p in products if _is_strong_match(user_message, p)]
+        if not _named and (image_b64 or (user_message or "").strip() == "[صورة]"):
+            _named = [p for p in products if _is_strong_match(response_text, p)]
+        if len(_named) == 1:
+            try:
+                import ads
+                ads.vote(bundle["tenant"].id, state["source_ad_key"],
+                         _named[0].product_key, sender_id)
+                state["ad_vote_cast"] = True
+                state["source_ad_product_key"] = _named[0].product_key
+            except Exception as e:
+                from models import db as _db
+                _db.session.rollback()
+                print(f"⚠️ ad vote error: {e}")
 
     # العروض الديناميكية: لو الشروط تحققت في الرد ده، نعلّم إن العرض اتقدّم
     # (عشان مايتكررش في كل رسالة)
@@ -1074,6 +1172,50 @@ def _display_price(product, currency="جنيه"):
         amt = float(product.price_amount)
         return f"{int(amt) if amt.is_integer() else amt} {currency}"
     return ""
+
+
+# فقرة تفكير داخلي اتسربت للعميل (محادثة حقيقية): «العميل جاي من إعلان وسأل "السعر" بس…
+# حسب القواعد، سؤال تأهيل واحد… فأنسب رد: …». بنشيل أي فقرة شكلها كده قبل الإرسال.
+_META_RE = None
+
+
+def _strip_meta(text):
+    import re as _re
+    global _META_RE
+    if _META_RE is None:
+        _META_RE = _re.compile(
+            r"حسب القواعد|حسب التعليمات|حسب البرومبت|(?:أنسب|افضل|أفضل) رد|العميل (?:جاي|سأل|قال|بيسأل)"
+            r"|ما حددش المنتج|\[🧭|🧭|system prompt|التلميح")
+    if not text or not _META_RE.search(text):
+        return text
+    paras = [p for p in _re.split(r"\n\s*\n", text) if p.strip()]
+    kept = [p for p in paras if not _META_RE.search(p)]
+    if len(kept) != len(paras):
+        print(f"🧹 شلت {len(paras) - len(kept)} فقرة تفكير داخلي من الرد قبل الإرسال")
+    return "\n\n".join(kept).strip()
+
+
+_AR_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+
+
+def _price_offer(product):
+    """
+    (السعر الحالي، السعر القديم، نسبة الخصم) لو price_note فيها سعر قديم
+    («199 بدل 280»، «بدلاً من»، «قبل الخصم»، «عوضاً عن») — وإلا None.
+    من محادثة حقيقية: العميل قال «الإعلان فيه خصم 30%» والبوت قال «ما عنديش خصم»،
+    مع إن 199 بدل 280 هو الخصم نفسه.
+    """
+    import re as _re
+    note = (product.price_note or "").translate(_AR_DIGITS)
+    m = _re.search(r"(?:بدل(?:اً|ا)?(?:\s*من)?|قبل(?:\s*الخصم)?|عوض(?:اً|ا)?\s*عن|كان)\s*:?\s*(\d+(?:\.\d+)?)", note)
+    if not m:
+        return None
+    old = float(m.group(1))
+    nums = [float(x) for x in _re.findall(r"\d+(?:\.\d+)?", note[:m.start()])]
+    new = nums[-1] if nums else (float(product.price_amount) if product.price_amount else None)
+    if not new or old <= new:
+        return None
+    return new, old, round((old - new) / old * 100)
 
 
 def compute_order_price(product, state, discount_code="", currency="جنيه"):
@@ -1627,6 +1769,9 @@ def _handle_ai_failure(bundle, sender_id, user_message, state, page_id, platform
         f"العميل خد رسالة انتظار — افتح الإنبوكس ورد بنفسك.")
 
 
+HISTORY_TTL_HOURS = 48   # محادثة ساكتة أكتر من كده = تبدأ من غير التاريخ القديم
+
+
 def do_process_message(tenant_id, sender_id, user_message, page_id, platform,
                        image_b64=None, image_media_type="image/jpeg"):
     bundle = _tenant_cache.get(page_id, (None,))[0]
@@ -1645,6 +1790,18 @@ def do_process_message(tenant_id, sender_id, user_message, page_id, platform,
         fresh = default_state(tenant_id, page_id, platform)
         fresh.update(state or {})
         state = fresh
+
+    # محادثة راجعة بعد غياب طويل: التاريخ القديم بيشد البوت لأسعار/لهجة اتغيرت (حصل:
+    # عملاء من أيام إعداد سوريا رجعوا بعد التحويل لليبيا وخدوا السعر بالدولار وبالشامي).
+    _prev = state.get("last_message") or 0
+    if _prev and state.get("history") and time.time() - _prev > HISTORY_TTL_HOURS * 3600:
+        state["history"] = []
+        for _k in ("price_quoted", "price_quoted_time", "objections_count", "refusals_count",
+                   "soft_exits", "last_was_refusal", "last_was_soft_exit"):
+            state.pop(_k, None)
+        if state.get("stage") in ("OBJECTION", "INTERESTED", "INQUIRY"):
+            state["stage"] = "NEW"
+        print(f"🧽 {sender_id}: محادثة راجعة بعد أكتر من {HISTORY_TTL_HOURS} ساعة — بدأنا من جديد")
 
     state["last_message"]    = time.time()
     state["messages_count"]  = state.get("messages_count", 0) + 1

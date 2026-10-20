@@ -14,7 +14,7 @@ from flask_login import login_required, current_user
 
 from models import (
     db, Tenant, Product, Policy, BotConfig, Keyword, BotAppId,
-    FollowupStage, Page, Order, SmartRule, MetaLabel, SalaryCampaign,
+    FollowupStage, Page, Order, SmartRule, MetaLabel, SalaryCampaign, AdProduct,
 )
 from auth import login_required_dashboard
 from bot_engine import invalidate_tenant_cache
@@ -889,7 +889,12 @@ def keywords_ai_suggest():
 def followups_list():
     tenant = _current_tenant()
     stages = FollowupStage.query.filter_by(tenant_id=tenant.id).order_by(FollowupStage.stage_number).all()
-    return render_template("followups.html", tenant=tenant, stages=stages)
+    # الخانة في صفحة السياسات بتوقف كل المتابعات — الصفحة دي لازم تبين ده
+    # (كانت مكتوب عليها «مفعّل تلقائياً» حتى والمتابعات واقفة)
+    policy = tenant.policy
+    followups_on = not (policy and not policy.enable_followup)
+    return render_template("followups.html", tenant=tenant, stages=stages,
+                           followups_on=followups_on)
 
 
 @dashboard_bp.route("/followups/add", methods=["POST"])
@@ -1054,6 +1059,50 @@ def orders_list():
     tenant = _current_tenant()
     orders = Order.query.filter_by(tenant_id=tenant.id).order_by(Order.created_at.desc()).limit(100).all()
     return render_template("orders.html", tenant=tenant, orders=orders)
+
+
+# =====================================================================
+# ADS — ربط الإعلانات بالمنتجات (ads.py)
+# =====================================================================
+@dashboard_bp.route("/ads")
+@login_required_dashboard
+def ads_list():
+    tenant = _current_tenant()
+    rows = (AdProduct.query.filter_by(tenant_id=tenant.id)
+            .order_by(AdProduct.last_seen.desc()).all())
+    products = (Product.query.filter_by(tenant_id=tenant.id, is_active=True)
+                .order_by(Product.name).all())
+    names = {p.product_key: p.name for p in products}
+    return render_template("ads.html", tenant=tenant, ads=[r.to_dict() for r in rows],
+                           products=products, names=names)
+
+
+@dashboard_bp.route("/ads/<ad_id>", methods=["POST"])
+@login_required_dashboard
+def ads_set_product(ad_id):
+    """JSON بس: {"product_key": "..."} = ربط يدوي، أو {"mode": "auto"} = رجّعه للتعلم التلقائي."""
+    tenant = _current_tenant()
+    if not request.is_json:
+        return jsonify({"ok": False, "error": "JSON only"}), 400
+    row = AdProduct.query.filter_by(id=ad_id, tenant_id=tenant.id).first()
+    if not row:
+        return jsonify({"ok": False, "error": "الإعلان مش موجود"}), 404
+    data = request.get_json(silent=True) or {}
+    if data.get("mode") == "auto":
+        row.mode, row.product_key = "auto", None
+        row.votes, row.voters = "{}", "[]"     # يبدأ يتعلم من جديد
+    else:
+        pk = (data.get("product_key") or "").strip()
+        if not Product.query.filter_by(tenant_id=tenant.id, product_key=pk).first():
+            return jsonify({"ok": False, "error": "اختار منتج من القايمة"}), 400
+        row.mode, row.product_key = "manual", pk
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        print(f"⚠️ ads_set_product error: {e}")
+        return jsonify({"ok": False, "error": "ماقدرناش نحفظ — جرّب تاني"}), 500
+    return jsonify({"ok": True, "ad": row.to_dict()})
 
 
 # =====================================================================

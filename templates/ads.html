@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}الإعلانات{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">الإعلانات 📢</h1>
+  <p class="page-sub">كل إعلان (Click-to-Message) جاب عملاء، ومربوط بأنهي منتج — عشان لما العميل يكتب «السعر» البوت يعرف بيتكلم على إيه</p>
+</div>
+
+<div class="card" style="border:1px solid #DDD0F8; background:linear-gradient(135deg,#FBF9FF,#F4EEFF); margin-bottom:20px; font-size:14px; line-height:1.9">
+  <b>إزاي بيشتغل؟</b><br>
+  • <b>تلقائي:</b> البوت بيتعلم لوحده — لما عميلين مختلفين من نفس الإعلان يسمّوا نفس المنتج (أو يبعتوا صورة الإعلان)، الإعلان يتربط بيه.<br>
+  • <b>أمان:</b> لو عملاء نفس الإعلان طلعوا بيسألوا عن منتجين مختلفين (حملتين دخلوا على بعض)، البوت <b>بيوقف الربط لوحده</b> ويبعتلك تنبيه — عشان محدش ياخد سعر منتج غلط.<br>
+  • <b>يدوي:</b> اختار المنتج بنفسك من القايمة — ده بيغلب التلقائي ومابيتغيرش لوحده.
+</div>
+
+<div class="card" style="padding:0; overflow:hidden">
+  {% if ads %}
+  <table>
+    <thead><tr><th>الإعلان</th><th>العملاء</th><th>الحالة</th><th>المنتج</th></tr></thead>
+    <tbody>
+      {% for a in ads %}
+      <tr id="ad-{{ a.id }}">
+        <td style="font-size:13px; max-width:280px">
+          <b>{{ a.ad_title or 'إعلان بدون عنوان' }}</b><br>
+          <span style="color:var(--text-soft); font-size:11px">{{ a.ad_key }} · آخر عميل {{ a.last_seen }}</span>
+          {% if a.votes %}
+          <div style="font-size:11px; color:#64748b; margin-top:4px">
+            سألوا عن: {% for k, v in a.votes.items() %}{{ names.get(k, k) }} ({{ v }}){% if not loop.last %}، {% endif %}{% endfor %}
+          </div>
+          {% endif %}
+        </td>
+        <td>{{ a.hits }}</td>
+        <td class="ad-status">
+          {% if a.mode == 'manual' %}<span class="badge badge-purple">✋ يدوي</span>
+          {% elif a.mode == 'conflict' %}<span class="badge badge-red">⚠️ منتجين — اختار</span>
+          {% elif a.product_key %}<span class="badge badge-green">🤖 اتربط تلقائي</span>
+          {% else %}<span class="badge">⏳ بيتعلم</span>{% endif %}
+        </td>
+        <td style="white-space:nowrap">
+          <select onchange="setAdProduct('{{ a.id }}', this)" style="width:220px">
+            <option value="">— اختار منتج —</option>
+            {% for p in products %}
+            <option value="{{ p.product_key }}" {{ 'selected' if p.product_key == a.product_key }}>{{ p.name }}</option>
+            {% endfor %}
+          </select>
+          <button class="btn btn-sm" onclick="resetAd('{{ a.id }}')" title="امسح الربط وخلّي البوت يتعلم من جديد">↺ تلقائي</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div style="padding:30px; text-align:center; color:var(--text-soft)">
+    لسه مفيش عملاء جم من إعلانات رسائل. أول ما حد يضغط على إعلان ويكتب، الإعلان هيظهر هنا.
+  </div>
+  {% endif %}
+</div>
+
+<script>
+const STATUS = {
+  manual:   '<span class="badge badge-purple">✋ يدوي</span>',
+  conflict: '<span class="badge badge-red">⚠️ منتجين — اختار</span>',
+  linked:   '<span class="badge badge-green">🤖 اتربط تلقائي</span>',
+  learning: '<span class="badge">⏳ بيتعلم</span>',
+};
+function _status(ad){
+  if (ad.mode === 'manual') return STATUS.manual;
+  if (ad.mode === 'conflict') return STATUS.conflict;
+  return ad.product_key ? STATUS.linked : STATUS.learning;
+}
+async function _post(id, body){
+  const r = await fetch(`{{ url_for('dashboard.ads_list') }}/${id}`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  const d = await r.json().catch(() => ({ok: false, error: 'خطأ في الاتصال'}));
+  if (!d.ok) { alert(d.error || 'حصل خطأ'); return null; }
+  const row = document.getElementById('ad-' + id);
+  row.querySelector('.ad-status').innerHTML = _status(d.ad);
+  row.querySelector('select').value = d.ad.product_key || '';
+  return d.ad;
+}
+function setAdProduct(id, sel){
+  if (!sel.value) return;
+  _post(id, {product_key: sel.value});
+}
+function resetAd(id){
+  if (!confirm('هيتمسح الربط والبوت يبدأ يتعلم من جديد من العملاء الجايين. متأكد؟')) return;
+  _post(id, {mode: 'auto'});
+}
+</script>
+{% endblock %}

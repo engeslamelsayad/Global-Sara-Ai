@@ -82,6 +82,7 @@ class Tenant(db.Model):
     smart_rules   = db.relationship("SmartRule",      backref="tenant", cascade="all, delete-orphan",
                                      order_by="SmartRule.created_at")
     meta_labels   = db.relationship("MetaLabel",      backref="tenant", cascade="all, delete-orphan")
+    ad_products   = db.relationship("AdProduct",      backref="tenant", cascade="all, delete-orphan")
 
     def to_dict(self):
         return {
@@ -493,4 +494,43 @@ class MetaLabel(db.Model):
             "id": self.id, "name": self.name,
             "trigger_stage": self.trigger_stage, "is_active": self.is_active,
             "meta_label_ids": _j.loads(self.meta_label_ids or "{}"),
+        }
+
+
+# =====================================================================
+# AD_PRODUCT — ربط إعلان (Click-to-Message) بالمنتج بتاعه
+# =====================================================================
+class AdProduct(db.Model):
+    """
+    الإعلانات بتيجي بعناوين زي «New Sales Ad_Group_1» مابتطابقش أي منتج، فالبوت
+    كان بيسأل «أي منتج؟» لعملاء جايين عشان منتج واحد. الجدول ده بيربط الإعلان
+    (بالـ ad_id، أو العنوان لو مفيش id) بالمنتج.
+
+    mode:
+      auto     — البوت بيتعلم لوحده من عملاء الإعلان (votes) — شوف ads.py
+      manual   — التاجر اختار المنتج من الداشبورد (أعلى أولوية، مابيتغيرش لوحده)
+      conflict — عملاء نفس الإعلان سألوا عن منتجين مختلفين → الربط التلقائي اتوقف
+                 لحد ما التاجر يختار (غالباً حملتين دخلوا على بعض)
+    """
+    __tablename__ = "ad_products"
+    __table_args__ = (UniqueConstraint("tenant_id", "ad_key", name="uq_ad_products_tenant_ad"),)
+
+    id          = db.Column(db.String(36), primary_key=True, default=gen_uuid)
+    tenant_id   = db.Column(db.String(36), db.ForeignKey("tenants.id"), nullable=False, index=True)
+    ad_key      = db.Column(db.String(120), nullable=False)   # ad_id أو "title:<العنوان>"
+    ad_title    = db.Column(db.String(300))
+    product_key = db.Column(db.String(80))                    # None = مش مربوط
+    mode        = db.Column(db.String(12), default="auto")
+    votes       = db.Column(db.Text, default="{}")            # JSON: {product_key: عدد العملاء}
+    voters      = db.Column(db.Text, default="[]")            # JSON: آخر sender_ids اللي صوّتوا
+    hits        = db.Column(db.Integer, default=0)            # عدد العملاء اللي جم من الإعلان
+    last_seen   = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at  = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id, "ad_key": self.ad_key, "ad_title": self.ad_title,
+            "product_key": self.product_key, "mode": self.mode,
+            "votes": json.loads(self.votes or "{}"), "hits": self.hits or 0,
+            "last_seen": self.last_seen.strftime("%Y-%m-%d %H:%M") if self.last_seen else "",
         }
