@@ -19,7 +19,11 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import UniqueConstraint
 from werkzeug.security import generate_password_hash, check_password_hash
 
-db = SQLAlchemy()
+# expire_on_commit=False: كاش الـ tenant في bot_engine (60 ثانية) بيشيل كائنات ORM بين الطلبات.
+# من غيرها، أي commit (تسجيل إعلان، سؤال تليجرام، أوردر) بيعمل expire لكائنات الكاش، والطلب
+# اللي بعده بيلاقيها detached ومنتهية → DetachedInstanceError والعميل مايترّدش عليه
+# (حصل في production 20 أكتوبر — tests/test_cached_bundle_after_commit.py).
+db = SQLAlchemy(session_options={"expire_on_commit": False})
 
 
 def gen_uuid():

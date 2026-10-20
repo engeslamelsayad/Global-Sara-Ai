@@ -1,7 +1,7 @@
 # CLAUDE.md — Global Sara AI
 
 > الملف ده بيتقري تلقائياً من Claude Code في بداية كل جلسة. حطه في **جذر الريبو** (جنب `app_main.py`).
-> آخر تحديث: 20 أكتوبر 2026 — المتابعات بتتشغل وتتوقف من صفحة رسائل المتابعة بس (خانة السياسات اتشالت).
+> آخر تحديث: 20 أكتوبر 2026 — Hotfix: البوت مكانش بيرد على عملاء الإعلانات (DetachedInstanceError) → `expire_on_commit=False`.
 >
 > 📌 **قاعدة دايمة: أي تعديل في الكود لازم يتحدّث معاه الملف ده في نفس الـ PR** (خريطة الملفات، القواعد، حالة المشروع، وسطر "آخر تحديث"). PR من غير تحديث هنا = ناقص.
 
@@ -47,7 +47,7 @@
 ### قلب البوت
 - `webhook.py` — `/webhook` (GET verify + POST). بيوجّه كل event للـ tenant حسب `page_id`، بيفصل: referral / echo / stickers / رسايل عادية.
 - `bot_engine.py` (~89KB — **أخطر ملف**) — فيه:
-  - state (Redis + memory fallback)، tenant cache (60 ثانية)
+  - state (Redis + memory fallback)، tenant cache (60 ثانية) — **الكاش شايل كائنات ORM بين الطلبات، فـ `db` متعمول بـ `expire_on_commit=False` (`models.py`). ماترجعهاش:** أي commit في مسار الرسالة (تسجيل إعلان، سؤال، أوردر) كان بيعمل expire لكائنات الكاش، والطلب اللي بعده يقع بـ `DetachedInstanceError` والعميل مايترّدش عليه (`tests/test_cached_bundle_after_commit.py`).
   - `build_system_prompt` — بناء البرومبت الكامل
   - keyword matching (`_kw_hit` مع word boundary للكلمات القصيرة)
   - `get_ai_response` → استدعاء Claude (مع **منتج السياق**: لو الرسالة مافيهاش اسم منتج بيرجع لآخر منتج اتكلم عنه العميل أو منتج الإعلان)
@@ -203,7 +203,7 @@ rm -f local_dev.db instance/local_dev.db
 python -m py_compile *.py && echo "✅ syntax OK"
 ```
 > ⚠️ الـ smoke test ده على SQLite — مابيكشفش مشاكل الـ Postgres driver. لو لمست `db_init.py` أو الـ requirements، اتأكد كمان إن `create_engine` بيقوم بـ URL Postgres وهمي (يفشل في الاتصال بس، مش في الـ import).
-> **الاختبارات (`tests/`):** `pip install pytest` ثم `DISABLE_SCHEDULER=1 ANTHROPIC_API_KEY=x python -m pytest tests/ -q` (DB في الذاكرة — مابيلمسش `local_dev.db`). موجود حالياً: `tests/test_echo.py` (القاعدة #6)، `test_closing_reactions.py`، `test_autofill.py`، `test_google_sheet_script.py`، `test_objection_hint.py`، `test_refusal.py`، `test_log_text.py`، `test_ads_and_sales_fixes.py`، `test_telegram_questions.py`. لو بتعدّل منطق حساس (keywords، order parsing، السعر) ضيف ملف اختبار هناك للدالة دي بالذات.
+> **الاختبارات (`tests/`):** `pip install pytest` ثم `DISABLE_SCHEDULER=1 ANTHROPIC_API_KEY=x python -m pytest tests/ -q` (DB في الذاكرة — مابيلمسش `local_dev.db`). موجود حالياً: `tests/test_echo.py` (القاعدة #6)، `test_closing_reactions.py`، `test_autofill.py`، `test_google_sheet_script.py`، `test_objection_hint.py`، `test_refusal.py`، `test_log_text.py`، `test_ads_and_sales_fixes.py`، `test_telegram_questions.py`، `test_cached_bundle_after_commit.py`. لو بتعدّل منطق حساس (keywords، order parsing، السعر) ضيف ملف اختبار هناك للدالة دي بالذات.
 
 ### بعد التعديل
 - **حدّث الـ CLAUDE.md ده في نفس الـ PR** (القاعدة الدايمة فوق).
@@ -272,6 +272,7 @@ python -m py_compile *.py && echo "✅ syntax OK"
   - الحازم بيطمّن بضمانة مع كل إغلاق + خيار «المخزون محدود فعلاً» في إعدادات البوت (عمودين جداد في `bot_configs`).
   - كود Google Sheet للطلبات بقى زرار تحميل جنب الخانة + خطوات التركيب (بدل ما التاجر يدوّر على الكود بره).
   - «✨ إعداد البوت تلقائياً» (بديل ملء الخانات بـ ChatGPT): اقتراح متناسق لكل خانات شخصية البوت + القواعد الذكية من بيانات التاجر، بمراجعة قبل التطبيق. ومعاه: اقتراح المنتجات مابقاش يخترع مدة نتيجة/ردود FAQ، واقتراح الاعتراضات بيشوف السياسات والأسلوب، وإصلاح حقن نص الـ AI من غير escaping في `suggestObjections`. اختبارات: `tests/test_autofill.py`.
+  - **Hotfix (20 أكتوبر):** بعد PR #16 عميلة جاية من إعلان كتبت «السعر من فضلك» والبوت مارد — Meta بتبعت ضغطة الإعلان في طلب لوحده، `ads.record_hit` عمل commit فكائنات الكاش اتعملها expire، وطلب الرسالة وقع بـ `DetachedInstanceError`. الحل `expire_on_commit=False` + اختبار بيكرر الطلبين.
   - «أسئلة تليجرام»: بديل «نراجع مع الموظف ونرجعلك» اللي محدش كان بينفذه — الشخص المربوط بيجاوب على تليجرام، والإجابة بتتحفظ في ذاكرة البوت وتتبعت للعميل. ⚠️ لسه محتاج: إسلام يربط الشخص من الصفحة، ويشيل «نراجع مع الموظف» من قواعده الذكية لو اتعارضت.
   - **مراجعة 158 محادثة حقيقية (15–20 أكتوبر، أغلبها إعلان الموكيت) → أوردر واحد بس.** الأسباب بالترتيب: البوت مش عارف الإعلان عن أنهي منتج (اتعمل `ads.py`)، المقاسات والألوان مش مكتوبة فالبوت وعد «نراجع مع الموظف ونرجعلك» 18 مرة (PR «أسئلة تليجرام»)، الدولار والشامي من التاريخ القديم، نفي خصم الإعلان، «شكراً» بتقفل الحازم، كلمات مصري في الليبي وصيغة مؤنث لعميل مجهول. وخانة «تفعيل المتابعة» في السياسات اتشالت — المتابعات بتتشغل/تتوقف من صفحة رسائل المتابعة بس، والصفحة بتقول بوضوح لو مفيش ولا مرحلة مفعّلة.
   - ردود البوت بقت بتظهر في logs Railway (`🤖`) ورسالة العميل لحد 300 حرف بدل 60 — مراجعة المحادثات من غير screenshots. أرقام الموبايل متخفية (`tests/test_log_text.py`).
