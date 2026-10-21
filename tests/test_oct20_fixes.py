@@ -248,3 +248,9 @@ def test_followups_wait_in_quiet_hours(tenant, monkeypatch):
     monkeypatch.setattr(recovery, "is_quiet_hours", lambda d, now=None: False)
     recovery.run_followups(app)
     assert sent == ["q"]
+
+
+def test_employee_ok_for_complaints_and_returns():
+    assert _kinds("الفريق هيتواصل معاك بخصوص الاستبدال", user="الطقم وصلني معيوب نبي استبدال") == []
+    assert _kinds("الموظف يتابع معاك", state={"has_complaint": True}) == []
+    assert _kinds("الموظف يتابع معاك", user="تمام نرجعلك") == ["fake_employee"]

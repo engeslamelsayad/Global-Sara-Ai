@@ -23,7 +23,7 @@ from models import db, Product, SmartRule
 
 B = types.SimpleNamespace
 AI_OUT = {
-    "bot_name": "سارة", "bot_age": 99, "persona": "سارة بتبيع منتجات آمان ستور.", "tone": "ودودة",
+    "bot_name": "سلمى", "bot_age": 99, "persona": "سارة بتبيع منتجات آمان ستور.", "tone": "ودودة",
     "forbidden_words": ["دلوقتي", ""], "forbidden_openers": ["كيف يمكنني مساعدتك؟"],
     "objection_expensive": "x", "objection_unsure": "y", "objection_later": "z",
     "smart_rules": [{"category": "safety", "text": "من غير تشخيص."}, {"category": "bogus", "text": "توصيل مجاني."},
@@ -72,6 +72,9 @@ def test_autofill_sends_full_context_and_sanitizes(env):
     assert len(d["smart_rules"]) == ai_assist.AUTOFILL_MAX_RULES          # الحد بعد شيل الفاضي
     assert all(r["text"] for r in d["smart_rules"])
     assert d["smart_rules"][1]["category"] == "custom"                     # تصنيف غلط → custom
+    assert "ممنوعة — المعلومة الناقصة" in prompt and "بعد السعر يسأل عن المدينة" in prompt
+    assert "اعتراض متخفّي" in prompt                                       # «هفكر» على الحازم
+    assert d["bot_name"] == "سارة"                                         # الاسم الحالي مابيتغيرش
 
 
 def test_apply_rules_pauses_old_and_is_tenant_isolated(env):
